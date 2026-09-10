@@ -38,6 +38,10 @@ type pageData struct {
 	// the input rather than offering a box that silently does nothing.
 	SearchEnabled bool
 
+	// SessionCount is how many sessions were indexed when this page was
+	// built, so the status poll can report arrivals since then.
+	SessionCount int
+
 	// Transcript is nil when no session is open.
 	Transcript []render.Entry
 
@@ -53,11 +57,16 @@ func (s *Server) newPage(r *http.Request) (pageData, error) {
 	if err != nil {
 		return pageData{}, err
 	}
+	// Ignored on failure: the count drives a cosmetic affordance, and losing
+	// it should not cost the page.
+	count, _ := s.db.CountSessions(r.Context())
+
 	return pageData{
 		Sessions:      rows,
 		Query:         q,
 		Searching:     strings.TrimSpace(q) != "",
 		SearchEnabled: s.engine != nil,
+		SessionCount:  count,
 	}, nil
 }
 

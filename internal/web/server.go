@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/llimllib/spireweb/internal/index"
+	"github.com/llimllib/spireweb/internal/indexer"
 	"github.com/llimllib/spireweb/internal/render"
 	"github.com/llimllib/spireweb/internal/search"
 )
@@ -39,14 +40,25 @@ type Options struct {
 	// SourceDir is where Dev mode reads templates and static files from.
 	// Defaults to this package's directory relative to the working directory.
 	SourceDir string
+
+	// Indexer, when set, powers the header's indexing indicator.
+	Indexer StatusSource
 }
 
 // Server holds everything a request needs.
+// StatusSource reports what the indexer is doing. An interface so the web
+// package does not depend on the indexer running at all: with --no-watch, or
+// against a read-only index, there is nothing to report.
+type StatusSource interface {
+	Status() indexer.Status
+}
+
 type Server struct {
-	db     *index.DB
-	engine *search.Engine
-	cache  *sessionCache
-	opts   Options
+	db      *index.DB
+	engine  *search.Engine
+	indexer StatusSource
+	cache   *sessionCache
+	opts    Options
 
 	tmpl     *template.Template
 	tmplOnce sync.Once
@@ -61,7 +73,13 @@ func New(db *index.DB, engine *search.Engine, opts Options) (*Server, error) {
 	if opts.SourceDir == "" {
 		opts.SourceDir = devSourceDir()
 	}
-	s := &Server{db: db, engine: engine, cache: newSessionCache(defaultCacheSize), opts: opts}
+	s := &Server{
+		db:      db,
+		engine:  engine,
+		indexer: opts.Indexer,
+		cache:   newSessionCache(defaultCacheSize),
+		opts:    opts,
+	}
 	if _, err := s.templates(); err != nil {
 		return nil, err
 	}
@@ -124,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /search", s.handleSearch)
+	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /sessions/{id}", s.handleSession)
 	mux.HandleFunc("GET /sessions/{id}/tool/{msg}/{blk}", s.handleTool)
 	mux.HandleFunc("GET /static/chroma.css", s.handleChromaCSS)

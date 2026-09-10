@@ -1,0 +1,18 @@
+{{define "status.html" -}}
+{{- /* Replaces itself on each poll, so the server sets the next interval by
+       rendering it here rather than the page choosing once at load. */ -}}
+<div class="status{{if .Status.Busy}} is-busy{{end}}"
+     id="status"
+     hx-get="/status?n={{.Rendered}}"
+     hx-trigger="every {{.Poll}}"
+     hx-swap="outerHTML">
+  {{- if .Status.Busy }}
+  <span class="status-dot" aria-hidden="true"></span>
+  <span>indexing{{if .Status.Total}} {{.Status.Done}}/{{.Status.Total}}{{end}}</span>
+  {{- else if .New }}
+  <a href="/">{{.New}} new session{{if ne .New 1}}s{{end}}</a>
+  {{- else if .Status.LastErr }}
+  <span class="status-error" title="{{.Status.LastErr}}">indexing failed</span>
+  {{- end }}
+</div>
+{{- end}}

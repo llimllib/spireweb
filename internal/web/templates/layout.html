@@ -29,6 +29,13 @@
            disabled title="Search needs an index built with embeddings"
            {{- end }}>
   </form>
+
+  {{- /* Seeded server-side with the count this page rendered with, so the
+         poll can report new sessions without per-client state. */ -}}
+  <div class="status" id="status"
+       hx-get="/status?n={{.SessionCount}}"
+       hx-trigger="load"
+       hx-swap="outerHTML"></div>
 </header>
 
 <main class="panes">

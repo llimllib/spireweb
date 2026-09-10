@@ -37,6 +37,7 @@ flags:
   --addr ADDR    serve on this address (default 127.0.0.1:8080)
   --dev          reload templates and static files from disk per request
   --open         open a browser once the server is listening
+  --no-watch     do not index in the background while serving
 `
 
 func main() {
@@ -54,13 +55,14 @@ func main() {
 	addr := fs.String("addr", "127.0.0.1:8080", "listen address")
 	dev := fs.Bool("dev", false, "reload templates and static files from disk")
 	openBrowser := fs.Bool("open", false, "open a browser once listening")
+	noWatch := fs.Bool("no-watch", false, "do not index in the background")
 	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir()) }
 
 	var err error
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		err = runServe(*dbPath, *addr, *dev, *openBrowser)
+		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch)
 	case "index":
 		_ = fs.Parse(os.Args[2:])
 		err = runIndex(*dbPath, *dir, *full, *lexical)

@@ -15,11 +15,12 @@ import (
 
 	"github.com/llimllib/spireweb/internal/embed"
 	"github.com/llimllib/spireweb/internal/index"
+	"github.com/llimllib/spireweb/internal/indexer"
 	"github.com/llimllib/spireweb/internal/search"
 	"github.com/llimllib/spireweb/internal/web"
 )
 
-func runServe(dbPath, addr string, dev, launchBrowser bool) error {
+func runServe(dbPath, addr, dir string, dev, launchBrowser, noWatch bool) error {
 	if _, err := os.Stat(dbPath); err != nil {
 		return fmt.Errorf("no index at %s; run 'spireweb index' first", dbPath)
 	}
@@ -47,7 +48,18 @@ func runServe(dbPath, addr string, dev, launchBrowser bool) error {
 		return err
 	}
 
-	srv, err := web.New(db, buildEngine(db, driver), web.Options{Dev: dev})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// A writer, separate from the read pool above. WAL lets handlers read a
+	// consistent snapshot while this one indexes, so a reindex triggered by a
+	// conversation in another terminal never blocks a request.
+	live, closeLive := startIndexer(ctx, dbPath, driver, dir, noWatch)
+	if closeLive != nil {
+		defer closeLive()
+	}
+
+	srv, err := web.New(db, buildEngine(db, driver), web.Options{Dev: dev, Indexer: live})
 	if err != nil {
 		return err
 	}
@@ -68,9 +80,6 @@ func runServe(dbPath, addr string, dev, launchBrowser bool) error {
 	}
 
 	httpSrv := srv.Server(addr)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	errc := make(chan error, 1)
 	go func() { errc <- httpSrv.Serve(ln) }()
 
@@ -88,6 +97,41 @@ func runServe(dbPath, addr string, dev, launchBrowser bool) error {
 	}
 }
 
+// startIndexer opens a writer and keeps the index current in the background.
+//
+// Failure here is not fatal. The server's job is to show what is already
+// indexed, and a second spireweb holding the write lock, or a read-only
+// filesystem, should cost live updates rather than the whole interface.
+func startIndexer(ctx context.Context, dbPath, driver, dir string, noWatch bool) (web.StatusSource, func()) {
+	if noWatch {
+		return nil, nil
+	}
+
+	writer, err := index.Open(dbPath, driver)
+	if err != nil {
+		note("live indexing disabled: %v", err)
+		return nil, nil
+	}
+
+	opts := index.BuildOptions{Dir: dir}
+	if driver == index.SemanticDriverName {
+		if e, err := embed.New(writer.SQL(), embed.DefaultPaths()); err != nil {
+			note("new sessions will be indexed without embeddings: %v", err)
+		} else {
+			opts.Embedder = e
+		}
+	}
+
+	ix := indexer.New(writer, opts)
+	go func() {
+		if err := ix.Run(ctx, true); err != nil && ctx.Err() == nil {
+			note("indexer stopped: %v", err)
+		}
+	}()
+
+	return ix, func() { writer.Close() }
+}
+
 // buildEngine assembles the rankers available against this index.
 //
 // Lexical always works; semantic needs the extension, a model that loads, and
@@ -99,14 +143,21 @@ func buildEngine(db *index.DB, driver string) *search.Engine {
 	rankers := []search.Ranker{&search.Lexical{DB: db.SQL()}}
 
 	if driver == index.SemanticDriverName {
-		hasVectors, err := db.HasVectors()
-		if err != nil || !hasVectors {
-			note("index has no embeddings; searching by keyword only " +
-				"(run 'spireweb index' to add them)")
-		} else if e, err := embed.New(db.SQL(), embed.DefaultPaths()); err != nil {
+		if e, err := embed.New(db.SQL(), embed.DefaultPaths()); err != nil {
 			note("semantic search unavailable: %v", err)
 		} else {
+			// Attached whether or not the index currently has vectors. The
+			// background indexer adds them while the server runs, and gating
+			// on the count here would leave a process that started against an
+			// empty index searching by keyword until it was restarted. With no
+			// vectors the KNN query simply returns nothing and fusion falls
+			// back to lexical on its own.
 			rankers = append(rankers, &search.Semantic{DB: db.SQL(), Embedder: e})
+
+			if has, err := db.HasVectors(); err == nil && !has {
+				note("index has no embeddings yet; results will be keyword-only " +
+					"until indexing adds them")
+			}
 		}
 	}
 

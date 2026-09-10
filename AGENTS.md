@@ -66,9 +66,13 @@ honest test of "is semantic search working" is opening a connection.
 ## Connections
 
 - **Writer: one connection** (`SetMaxOpenConns(1)`). lembed's `llama_context`
-  is not safe for concurrent use; two goroutines embedding at once segfault.
-  Uses `_txlock=immediate`, because indexing reads before it writes and lock
-  upgrades fail rather than wait.
+  is not safe for concurrent use; two goroutines embedding through the *same*
+  connection segfault. Uses `_txlock=immediate`, because indexing reads before
+  it writes and lock upgrades fail rather than wait.
+- **Concurrent embedding on *different* connections is fine.** Each has its
+  own model and context. This matters because the background indexer embeds
+  chunks while handlers embed queries; there is a test that runs seven
+  connections at once, and no process-wide lock is needed.
 - **Readers: a pool**, `_query_only=true` — *not* `mode=ro`, which cannot
   create the `-shm`/`-wal` files WAL needs.
 - **The model is registered per connection**, via the driver's `ConnectHook`.
@@ -104,6 +108,25 @@ SELECT COUNT(*) FROM chunks_vec v
 SELECT COUNT(*) FROM chunks c
   WHERE NOT EXISTS (SELECT 1 FROM chunks_vec v WHERE v.rowid = c.id);
 ```
+
+## Live indexing
+
+`serve` opens a second, writing handle and runs a catch-up build followed by
+an fsnotify watcher. The catch-up finishes before the watcher starts: both
+write, through one connection, and overlapping them is the same-connection
+case above.
+
+Events are coalesced after a 2s lull, because pi writes once per message.
+
+The header polls `/status`, which **replaces itself**, so the server picks the
+next interval (2s busy, 10s idle) rather than the page choosing once at load.
+The page seeds the poll with the session count it rendered with, which is how
+"3 new sessions" works without the server tracking per-client state.
+
+Rankers are chosen once, at startup, so nothing there may depend on index
+*contents*: a server started against an empty index would otherwise stay
+keyword-only for its whole life. The semantic ranker is attached whenever the
+model loads, and returns nothing until vectors exist.
 
 ## Rendering
 

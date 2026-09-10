@@ -440,3 +440,37 @@ body {
   .list { border-right: 0; border-bottom: 1px solid var(--border); }
   .reading { padding: var(--space-md); }
 }
+
+/* ---------- indexing status ---------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  /* Reserves no space when empty, so the header does not shift as the
+     indicator comes and goes. */
+  min-width: 0;
+}
+
+.status a { color: var(--accent); }
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-error { color: var(--danger); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot { animation: none; }
+}

@@ -315,7 +315,19 @@ type FileInfo struct {
 }
 
 // Discover walks dir and returns every .jsonl session file.
+//
+// A missing or unreadable root is an error, while a bad subdirectory is not.
+// The distinction matters: one project directory that cannot be read should
+// not cost the other thousand, but a session directory that does not exist at
+// all means the path is wrong, and silently indexing nothing turns that into
+// an empty interface with no explanation.
 func Discover(dir string) ([]FileInfo, error) {
+	if fi, err := os.Stat(dir); err != nil {
+		return nil, err
+	} else if !fi.IsDir() {
+		return nil, fmt.Errorf("%s: not a directory", dir)
+	}
+
 	var out []FileInfo
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
