@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 
 	"github.com/llimllib/spireweb/internal/index"
+	"github.com/llimllib/spireweb/internal/search"
 )
 
 // Assertions run against the parsed document rather than golden files. The
@@ -58,13 +60,19 @@ func newFixture(t *testing.T, sessions map[string][]string) *fixture {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Deterministic ordering: later ids get later timestamps.
+	// Timestamps ascend with the id, so tests can say which session is newest.
+	// Ranging over the map directly would assign them in Go's randomized
+	// iteration order, which makes any "newest session" assertion a coin flip.
+	ids := make([]string, 0, len(sessions))
+	for id := range sessions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
 	stamps := map[string]string{}
 	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	i := 0
-	for id := range sessions {
+	for i, id := range ids {
 		stamps[id] = base.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)
-		i++
 	}
 	for id, msgs := range sessions {
 		header := `{"type":"session","version":3,"id":"` + id +
@@ -91,7 +99,13 @@ func newFixture(t *testing.T, sessions map[string][]string) *fixture {
 	}
 	t.Cleanup(func() { reader.Close() })
 
-	srv, err := New(reader, Options{})
+	// Lexical only: these tests exercise the web layer, and requiring a
+	// loadable embedding model would make the suite depend on a GPU.
+	engine := &search.Engine{
+		Rankers: []search.Ranker{&search.Lexical{DB: reader.SQL()}},
+		Fusion:  search.DefaultFusion(),
+	}
+	srv, err := New(reader, engine, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

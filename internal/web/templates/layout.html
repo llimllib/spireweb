@@ -14,10 +14,20 @@
 
 <header class="chrome">
   <a class="brand" href="/">spireweb</a>
-  {{- /* The box is part of the layout now; the Search milestone wires it up. */ -}}
+  {{- /* Submitting normally still works without JavaScript: the action is a
+         real page. HTMX only intercepts to swap the rows as you type. */ -}}
   <form class="search" role="search" action="/search" method="get">
     <input type="search" name="q" placeholder="Search sessions" value="{{.Query}}"
-           autocomplete="off" spellcheck="false" disabled>
+           autocomplete="off" spellcheck="false"
+           {{- if .SearchEnabled }}
+           hx-get="/search"
+           hx-trigger="input changed delay:150ms, search"
+           hx-target="#rows"
+           hx-swap="outerHTML"
+           hx-indicator=".search"
+           {{- else }}
+           disabled title="Search needs an index built with embeddings"
+           {{- end }}>
   </form>
 </header>
 

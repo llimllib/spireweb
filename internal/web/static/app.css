@@ -112,6 +112,16 @@ body {
 
 .search input:disabled { opacity: 0.55; }
 
+.search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* htmx adds htmx-request to the hx-indicator element for the duration of a
+   request. At these latencies it is a flicker, which is the point: enough to
+   show the box is live, not enough to be a spinner. */
+.search.htmx-request input { border-color: var(--accent); }
+
 /* ---------- panes ---------- */
 
 .panes {
@@ -193,6 +203,19 @@ body {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
+}
+
+/* Matched terms inside a search excerpt. The browser default is a shouting
+   yellow that neither palette can live with. */
+.row-preview mark {
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.row.is-selected .row-preview mark {
+  color: var(--accent-fg);
+  opacity: 1;
 }
 
 .row-preview {

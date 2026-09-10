@@ -3,8 +3,10 @@
   {{- range .Sessions }}
   {{- $selected := and $.Selected (eq .ID $.Selected.ID) }}
   <li>
+    {{- /* The query rides along so that opening a result keeps the filtered
+           list beside it, and going back returns to the same search. */ -}}
     <a class="row{{if $selected}} is-selected{{end}}"
-       href="/sessions/{{.ID}}"
+       href="/sessions/{{.ID}}{{if $.Query}}?q={{$.Query}}{{end}}"
        {{- if $selected}} aria-current="page"{{end}}>
       <span class="row-meta">
         <span class="row-project" title="{{.CWD}}">{{.Project}}</span>
@@ -15,7 +17,9 @@
     </a>
   </li>
   {{- else }}
-  <li class="empty">Nothing indexed yet.</li>
+  <li class="empty">
+    {{- if $.Searching}}No sessions match that search.{{else}}Nothing indexed yet.{{end -}}
+  </li>
   {{- end }}
 </ol>
 {{- end}}

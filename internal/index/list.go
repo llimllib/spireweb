@@ -52,8 +52,25 @@ func (s Summary) Subtitle() string {
 	return s.Preview
 }
 
-const summaryColumns = `id, project, cwd, path, host, started_at, n_msgs,
-	COALESCE(title, ''), preview, reply`
+// SummaryColumns returns the select list ScanSummary expects, with each
+// column qualified by alias. Exported so search can return the same row type
+// the list pane already renders, rather than a parallel one that has to be
+// kept in step with it.
+func SummaryColumns(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return alias + "id, " + alias + "project, " + alias + "cwd, " + alias + "path, " +
+		alias + "host, " + alias + "started_at, " + alias + "n_msgs, " +
+		"COALESCE(" + alias + "title, ''), " + alias + "preview, " + alias + "reply"
+}
+
+var summaryColumns = SummaryColumns("")
+
+// ScanSummary reads a row selected with SummaryColumns.
+func ScanSummary(rows interface{ Scan(...any) error }) (Summary, error) {
+	return scanSummary(rows)
+}
 
 func scanSummary(rows interface{ Scan(...any) error }) (Summary, error) {
 	var s Summary

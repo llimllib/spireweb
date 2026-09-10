@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/render"
@@ -20,11 +21,22 @@ import (
 // truncated list rather than a hung tab.
 const listLimit = 2000
 
+// searchLimit caps how many sessions a query returns. Beyond a screenful or
+// two nobody reads further, and every row costs an excerpt query.
+const searchLimit = 100
+
 // pageData is what every full page render receives.
 type pageData struct {
-	Sessions []index.Summary
+	Sessions []row
 	Selected *index.Summary
 	Query    string
+
+	// Searching distinguishes "no sessions indexed" from "no matches".
+	Searching bool
+
+	// SearchEnabled is false when no ranker could be built, which disables
+	// the input rather than offering a box that silently does nothing.
+	SearchEnabled bool
 
 	// Transcript is nil when no session is open.
 	Transcript []render.Entry
@@ -34,28 +46,43 @@ type pageData struct {
 	Notice string
 }
 
+// newPage assembles the list pane, which every full page render needs.
+func (s *Server) newPage(r *http.Request) (pageData, error) {
+	q := r.URL.Query().Get("q")
+	rows, err := s.rowsFor(r.Context(), q)
+	if err != nil {
+		return pageData{}, err
+	}
+	return pageData{
+		Sessions:      rows,
+		Query:         q,
+		Searching:     strings.TrimSpace(q) != "",
+		SearchEnabled: s.engine != nil,
+	}, nil
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	sessions, err := s.db.ListSessions(r.Context(), listLimit, 0)
+	data, err := s.newPage(r)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	data := pageData{Sessions: sessions}
 
-	// The newest session opens by default, which is almost always the one you
-	// came back for.
-	if len(sessions) > 0 {
-		s.loadTranscript(r, &data, sessions[0])
-	} else {
+	// The top result opens by default: the newest session when browsing, the
+	// best match when searching, which is the one you were looking for.
+	switch {
+	case len(data.Sessions) > 0:
+		s.loadTranscript(&data, data.Sessions[0].Summary)
+	case data.Searching:
+		data.Notice = "No sessions match that search."
+	default:
 		data.Notice = "No sessions indexed yet. Run `spireweb index`."
 	}
 	s.render(w, r, "layout.html", data)
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	selected, err := s.db.Session(r.Context(), id)
+	selected, err := s.db.Session(r.Context(), r.PathValue("id"))
 	if errors.Is(err, index.ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -65,15 +92,34 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, err := s.db.ListSessions(r.Context(), listLimit, 0)
+	// The query rides along in the link, so opening a result keeps the
+	// filtered list beside it and going back behaves.
+	data, err := s.newPage(r)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-
-	data := pageData{Sessions: sessions}
-	s.loadTranscript(r, &data, selected)
+	s.loadTranscript(&data, selected)
 	s.render(w, r, "layout.html", data)
+}
+
+// handleSearch serves the list pane for a query.
+//
+// The one place in the codebase that branches on HX-Request. HTMX asks for
+// the rows alone and swaps them in place; a cold load or a pasted link gets
+// the whole page, so a search URL is a real, shareable page rather than a
+// fragment that renders as naked markup.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Request") != "true" {
+		s.handleIndex(w, r)
+		return
+	}
+	data, err := s.newPage(r)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, "list.html", data)
 }
 
 // loadTranscript parses the session file and fills in the right pane.
@@ -81,7 +127,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 // A missing file is reported in place rather than as an error page: the index
 // is a cache of what was on disk when it last ran, and a session deleted since
 // then should still show its metadata and say what happened.
-func (s *Server) loadTranscript(r *http.Request, data *pageData, sum index.Summary) {
+func (s *Server) loadTranscript(data *pageData, sum index.Summary) {
 	data.Selected = &sum
 
 	parsed, err := s.cache.Get(sum.Path)

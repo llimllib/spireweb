@@ -20,6 +20,7 @@ import (
 
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/render"
+	"github.com/llimllib/spireweb/internal/search"
 )
 
 //go:embed templates/*.html
@@ -42,20 +43,25 @@ type Options struct {
 
 // Server holds everything a request needs.
 type Server struct {
-	db    *index.DB
-	cache *sessionCache
-	opts  Options
+	db     *index.DB
+	engine *search.Engine
+	cache  *sessionCache
+	opts   Options
 
 	tmpl     *template.Template
 	tmplOnce sync.Once
 }
 
 // New builds a Server over a read-only index handle.
-func New(db *index.DB, opts Options) (*Server, error) {
+//
+// A nil engine disables search rather than failing: browsing an index that
+// has no vectors, or was built by a binary that could not load the embedding
+// model, is still worth doing.
+func New(db *index.DB, engine *search.Engine, opts Options) (*Server, error) {
 	if opts.SourceDir == "" {
 		opts.SourceDir = devSourceDir()
 	}
-	s := &Server{db: db, cache: newSessionCache(defaultCacheSize), opts: opts}
+	s := &Server{db: db, engine: engine, cache: newSessionCache(defaultCacheSize), opts: opts}
 	if _, err := s.templates(); err != nil {
 		return nil, err
 	}
@@ -117,6 +123,7 @@ func (s *Server) templates() (*template.Template, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /search", s.handleSearch)
 	mux.HandleFunc("GET /sessions/{id}", s.handleSession)
 	mux.HandleFunc("GET /sessions/{id}/tool/{msg}/{blk}", s.handleTool)
 	mux.HandleFunc("GET /static/chroma.css", s.handleChromaCSS)
