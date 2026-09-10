@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#MISE description="Install the embedding model and sqlite-lembed (~30s, first run only)"
+#
+# Semantic search needs two things that are too large to vendor: the
+# all-MiniLM-L6-v2 GGUF model, and the sqlite-lembed extension.
+#
+# sqlite-lembed is built from the landrix fork rather than upstream's prebuilt
+# binary. Upstream v0.0.1-alpha.8 has two bugs that kill the host process
+# instead of returning an error:
+#
+#   - input over 512 tokens overflows a fixed-size batch (SIGSEGV, silent)
+#   - invalid UTF-8 escapes as an uncaught C++ exception (SIGABRT)
+#
+# The fork (PRs #19 + #21 merged) bound-checks token count and ships a newer
+# llama.cpp that tolerates malformed UTF-8. It also builds with Metal, which
+# upstream's prebuilt binary lacked.
+set -euo pipefail
+
+DATA_DIR="${SPIREWEB_DATA_DIR:-$HOME/.local/share/spireweb}"
+MODEL="$DATA_DIR/all-MiniLM-L6-v2.Q8_0.gguf"
+SRC="$DATA_DIR/src/sqlite-lembed"
+
+case "$(uname -s)" in
+  Darwin) EXT_FILE=lembed0.dylib ;;
+  *)      EXT_FILE=lembed0.so ;;
+esac
+EXT="$DATA_DIR/$EXT_FILE"
+
+MODEL_URL="https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2.Q8_0.gguf?download=true"
+LEMBED_REPO="https://github.com/landrix/sqlite-lembed"
+
+mkdir -p "$DATA_DIR"
+
+if [ ! -f "$MODEL" ]; then
+  echo "==> downloading all-MiniLM-L6-v2 (~25MB)"
+  curl -fsSL -o "$MODEL" "$MODEL_URL"
+fi
+
+if [ ! -f "$EXT" ]; then
+  echo "==> building sqlite-lembed from the landrix fork (~15s)"
+  mkdir -p "$DATA_DIR/src"
+  [ -d "$SRC" ] || git clone --depth 1 "$LEMBED_REPO" "$SRC"
+  (
+    cd "$SRC"
+    git submodule update --init --depth 1 vendor/llama.cpp
+    # Built statically so the result is one self-contained file: a shared build
+    # leaves lembed0.dylib at 69KB with @rpath deps on six sibling libggml dylibs.
+    CMAKE_ARGS=(-B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF)
+    if [ "$(uname -s)" = "Darwin" ]; then
+      CMAKE_ARGS+=(-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON)
+    fi
+    cmake "${CMAKE_ARGS[@]}"
+    cmake --build build -j8
+  )
+  cp "$SRC/build/bin/$EXT_FILE" "$EXT"
+fi
+
+# Fail loudly if the installed extension is the crashing upstream build rather
+# than the fork. The difference only shows up as a process death much later.
+echo "==> verifying"
+python3 - "$EXT" <<'PY'
+import sqlite3, sys
+ext = sys.argv[1]
+db = sqlite3.connect(":memory:")
+db.enable_load_extension(True)
+db.load_extension(ext)
+version = db.execute("select lembed_version()").fetchone()[0]
+print("lembed:", version)
+if "landrix" not in version:
+    sys.exit(f"ERROR: {ext} is not the patched fork; run 'rm {ext}' and retry")
+PY
+
+ls -lh "$DATA_DIR"/*.gguf "$DATA_DIR"/*."${EXT_FILE##*.}"

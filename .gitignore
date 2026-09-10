@@ -1,0 +1,10 @@
+/spireweb
+/node_modules/
+
+# tsc output, built by `mise run ts`. Sources live in web/ts.
+/web/static/*.js
+/web/static/*.js.map
+
+*.db
+*.db-wal
+*.db-shm

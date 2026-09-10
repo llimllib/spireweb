@@ -1,0 +1,69 @@
+[tools]
+go = "1.26"
+node = "24"
+# npm backend rather than the default aqua one: aqua verifies pnpm's GitHub
+# artifact attestations, which currently fail against pnpm's release workflow.
+"npm:pnpm" = "latest"
+golangci-lint = "latest"
+"go:github.com/bokwoon95/wgo" = "latest"
+
+[env]
+# mattn/go-sqlite3 omits FTS5 unless this tag is set, and without it the schema
+# fails at runtime with the unhelpful "no such module: fts5". Setting it in the
+# environment rather than in a build wrapper means plain `go test`, `go vet`,
+# and editor tooling all get it too.
+GOFLAGS = "-tags=sqlite_fts5"
+
+# Where the embedding model and the sqlite-lembed extension are installed.
+SPIREWEB_DATA_DIR = "{{env.HOME}}/.local/share/spireweb"
+
+[tasks.ts]
+description = "Compile TypeScript to web/static/app.js"
+run = "pnpm exec tsc"
+sources = ["web/ts/*.ts", "tsconfig.json"]
+outputs = ["web/static/app.js"]
+
+[tasks.build]
+description = "Build the spireweb binary"
+depends = ["ts"]
+run = 'go build -ldflags "-X main.Version=$(git describe --tags --dirty 2>/dev/null)" -o spireweb ./cmd/spireweb'
+
+[tasks.test]
+description = "Run the Go test suite"
+run = "go test ./..."
+
+[tasks.fmt]
+description = "Format Go sources"
+run = "gofmt -l -w ."
+
+[tasks.lint]
+description = "Vet, lint, and typecheck"
+run = ["go vet ./...", "golangci-lint run", "pnpm exec oxlint web/ts", "pnpm exec tsc --noEmit"]
+
+[tasks.gofmt-check]
+description = "Fail if any Go source is unformatted"
+run = 'out=$(gofmt -l .); if [ -n "$out" ]; then echo "unformatted:"; echo "$out"; exit 1; fi'
+
+[tasks.check]
+description = "Everything CI runs; run this before committing"
+depends = ["gofmt-check", "lint", "test"]
+
+[tasks.index]
+description = "Build the search index"
+depends = ["build"]
+run = "./spireweb index"
+
+[tasks."dev:go"]
+description = "Run the server, rebuilding on change"
+run = "wgo run ./cmd/spireweb serve --dev"
+
+[tasks."dev:ts"]
+description = "Compile TypeScript on change"
+run = "pnpm exec tsc --watch --preserveWatchOutput"
+
+[tasks.dev]
+description = "Run the server and the TypeScript compiler in watch mode"
+depends = ["dev:go", "dev:ts"]
+
+[tasks.clean]
+run = "rm -f spireweb web/static/app.js"

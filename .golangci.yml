@@ -1,0 +1,15 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # Cleanup calls whose failure a caller cannot act on. This is
+      # golangci-lint's own retired EXC0001; without it errcheck flags every
+      # `defer f.Close()` in the repository.
+      - linters: [errcheck]
+        text: "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Rollback|.*print(f|ln)?|os\\.(Un)?Setenv). is not checked"
+
+      # Tests fail loudly on their own when setup does not work, and threading
+      # error checks through fixture construction obscures what is under test.
+      - linters: [errcheck]
+        path: _test\.go
