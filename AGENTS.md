@@ -73,6 +73,10 @@ honest test of "is semantic search working" is opening a connection.
   own model and context. This matters because the background indexer embeds
   chunks while handlers embed queries; there is a test that runs seven
   connections at once, and no process-wide lock is needed.
+- **Each context costs ~30MB.** `serve` is 151MB idle and ~270MB once the
+  reader pool is open, almost all of it the five loaded models. Raising
+  `ReaderConns` costs 30MB a connection, which is the reason it is 4 and not
+  something larger.
 - **Readers: a pool**, `_query_only=true` — *not* `mode=ro`, which cannot
   create the `-shm`/`-wal` files WAL needs.
 - **The model is registered per connection**, via the driver's `ConnectHook`.
@@ -147,8 +151,22 @@ rather than `:focus-visible` does the styling, because a programmatic
 `focus()` does not always count as keyboard-initiated.
 
 `app.ts` reaches the page through selectors, which nothing type-checks.
-`markup_test.go` pins that contract. It cannot tell whether `j` works -- no
-browser test exists yet.
+`markup_test.go` pins that contract. It cannot tell whether `j` works: the
+bindings were confirmed by hand, and no browser test exists yet.
+
+## Tests
+
+`mise run check` is ~20s. Nearly all of it is `internal/index` and
+`internal/indexer`: the watcher tests wait out a 2s settle timer, and each
+semantic test loads the model. The other five packages total under 2s.
+
+Semantic tests skip when the backend cannot actually run, not when its files
+are missing -- see the GPU note above.
+
+## Changing GitHub Actions
+
+Run `aver` after editing a workflow; it reports outdated action versions.
+`actionlint` (via docker) catches syntax errors.
 
 ## Corpus
 
