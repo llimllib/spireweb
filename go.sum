@@ -1,0 +1,4 @@
+github.com/asg017/sqlite-vec-go-bindings v0.1.4-alpha.1 h1:yh+K2MB2XFccadFEvibCpPYBu0ZGzTpCn4pPYGh7QT8=
+github.com/asg017/sqlite-vec-go-bindings v0.1.4-alpha.1/go.mod h1:A8+cTt/nKFsYCQF6OgzSNpKZrzNo5gQsXBTfsXHXY0Q=
+github.com/mattn/go-sqlite3 v1.14.49 h1:B8jBHC3xhxZgxztrgruTuLucebnULQnx4W7cF7SAE9w=
+github.com/mattn/go-sqlite3 v1.14.49/go.mod h1:6JTjA44L93a0QCyJef5YvlPoKXntQPjzWv5gtm9sB6w=
