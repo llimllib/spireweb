@@ -22,6 +22,7 @@ var Version = "dev"
 const usage = `spireweb - search and read pi agent sessions
 
 usage:
+  spireweb serve [flags]   browse sessions in a web interface
   spireweb index [flags]   build or update the search index
   spireweb stats [flags]   report what is in the index
   spireweb doctor [flags]  check the index for inconsistencies
@@ -33,6 +34,9 @@ flags:
   --dir PATH     session directory (default %s)
   --full         reindex everything rather than what changed
   --lexical      skip semantic indexing, even if the model is installed
+  --addr ADDR    serve on this address (default 127.0.0.1:8080)
+  --dev          reload templates and static files from disk per request
+  --open         open a browser once the server is listening
 `
 
 func main() {
@@ -47,10 +51,16 @@ func main() {
 	dir := fs.String("dir", session.DefaultDir(), "session directory")
 	full := fs.Bool("full", false, "reindex everything")
 	lexical := fs.Bool("lexical", false, "skip semantic indexing")
+	addr := fs.String("addr", "127.0.0.1:8080", "listen address")
+	dev := fs.Bool("dev", false, "reload templates and static files from disk")
+	openBrowser := fs.Bool("open", false, "open a browser once listening")
 	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir()) }
 
 	var err error
 	switch cmd {
+	case "serve":
+		_ = fs.Parse(os.Args[2:])
+		err = runServe(*dbPath, *addr, *dev, *openBrowser)
 	case "index":
 		_ = fs.Parse(os.Args[2:])
 		err = runIndex(*dbPath, *dir, *full, *lexical)

@@ -20,8 +20,8 @@ SPIREWEB_DATA_DIR = "{{env.HOME}}/.local/share/spireweb"
 [tasks.ts]
 description = "Compile TypeScript to web/static/app.js"
 run = "pnpm exec tsc"
-sources = ["web/ts/*.ts", "tsconfig.json"]
-outputs = ["web/static/app.js"]
+sources = ["internal/web/ts/*.ts", "tsconfig.json"]
+outputs = ["internal/web/static/app.js"]
 
 [tasks.build]
 description = "Build the spireweb binary"
@@ -38,7 +38,7 @@ run = "gofmt -l -w ."
 
 [tasks.lint]
 description = "Vet, lint, and typecheck"
-run = ["go vet ./...", "golangci-lint run", "pnpm exec oxlint web/ts", "pnpm exec tsc --noEmit"]
+run = ["go vet ./...", "golangci-lint run", "pnpm exec oxlint internal/web/ts", "pnpm exec tsc --noEmit"]
 
 [tasks.gofmt-check]
 description = "Fail if any Go source is unformatted"
@@ -66,4 +66,4 @@ description = "Run the server and the TypeScript compiler in watch mode"
 depends = ["dev:go", "dev:ts"]
 
 [tasks.clean]
-run = "rm -f spireweb web/static/app.js"
+run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map"

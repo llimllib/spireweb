@@ -1,0 +1,19 @@
+{{define "tooldetail.html" -}}
+{{- with .Args }}
+<div class="tool-section">
+  <h4>arguments</h4>
+  <pre class="tool-args"><code>{{.}}</code></pre>
+</div>
+{{- end }}
+{{- if .Output }}
+<div class="tool-section">
+  <h4>{{if .IsError}}error{{else}}output{{end}}</h4>
+  <pre class="tool-output"><code>{{.Output}}</code></pre>
+  {{- if .Truncated }}
+  <p class="tool-clipped">Clipped: showing the first {{len .Output}} of {{.FullBytes}} bytes.</p>
+  {{- end }}
+</div>
+{{- else }}
+<p class="tool-clipped">No output.</p>
+{{- end }}
+{{- end}}

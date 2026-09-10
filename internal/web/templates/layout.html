@@ -1,0 +1,36 @@
+{{define "layout.html" -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{with .Selected}}{{.Heading}} — {{end}}spireweb</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/chroma.css">
+<script src="/static/htmx.min.js" defer></script>
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+
+<header class="chrome">
+  <a class="brand" href="/">spireweb</a>
+  {{- /* The box is part of the layout now; the Search milestone wires it up. */ -}}
+  <form class="search" role="search" action="/search" method="get">
+    <input type="search" name="q" placeholder="Search sessions" value="{{.Query}}"
+           autocomplete="off" spellcheck="false" disabled>
+  </form>
+</header>
+
+<main class="panes">
+  <nav class="list" aria-label="Sessions">
+    {{- template "list.html" . }}
+  </nav>
+
+  <article class="reading">
+    {{- template "transcript.html" . }}
+  </article>
+</main>
+
+</body>
+</html>
+{{- end}}

@@ -1,0 +1,21 @@
+{{define "list.html" -}}
+<ol class="rows" id="rows">
+  {{- range .Sessions }}
+  {{- $selected := and $.Selected (eq .ID $.Selected.ID) }}
+  <li>
+    <a class="row{{if $selected}} is-selected{{end}}"
+       href="/sessions/{{.ID}}"
+       {{- if $selected}} aria-current="page"{{end}}>
+      <span class="row-meta">
+        <span class="row-project" title="{{.CWD}}">{{.Project}}</span>
+        <time class="row-date" datetime="{{rfc3339 .StartedAt}}">{{date .StartedAt}}</time>
+      </span>
+      <span class="row-title">{{.Heading}}</span>
+      <span class="row-preview">{{.Subtitle}}</span>
+    </a>
+  </li>
+  {{- else }}
+  <li class="empty">Nothing indexed yet.</li>
+  {{- end }}
+</ol>
+{{- end}}

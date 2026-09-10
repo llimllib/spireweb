@@ -14,8 +14,8 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "rootDir": "web/ts",
-    "outDir": "web/static"
+    "rootDir": "internal/web/ts",
+    "outDir": "internal/web/static"
   },
-  "include": ["web/ts/**/*.ts"]
+  "include": ["internal/web/ts/**/*.ts"]
 }

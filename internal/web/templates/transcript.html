@@ -1,0 +1,45 @@
+{{define "transcript.html" -}}
+{{- with .Selected }}
+<header class="reading-head">
+  <h1>{{.Heading}}</h1>
+  <p class="reading-meta">
+    <span title="{{.CWD}}">{{.Project}}</span>
+    <span aria-hidden="true">·</span>
+    <time datetime="{{rfc3339 .StartedAt}}">{{datetime .StartedAt}}</time>
+    <span aria-hidden="true">·</span>
+    <span>{{.NumMsgs}} messages</span>
+  </p>
+</header>
+{{- end }}
+
+{{- with .Notice }}
+<p class="notice">{{.}}</p>
+{{- end }}
+
+{{- range .Transcript }}
+{{- if eq .Kind "tool" }}
+  {{- with .Tool }}
+  {{- /* Loading on toggle rather than up front: tool traffic is around 98%
+         of a session's bytes, and a single call can carry a whole file. */ -}}
+  <details class="tool{{if .IsError}} is-error{{end}}">
+    <summary>
+      <span class="tool-name">{{.Name}}</span>
+      <span class="tool-summary">{{.Summary}}</span>
+      {{- if not .HasResult }}<span class="tool-flag">no result</span>{{end}}
+    </summary>
+    <div class="tool-body"
+         hx-get="/sessions/{{$.Selected.ID}}/tool/{{.MsgIdx}}/{{.Blk}}"
+         hx-trigger="toggle once from:closest details"
+         hx-swap="innerHTML">
+      <p class="tool-loading">Loading…</p>
+    </div>
+  </details>
+  {{- end }}
+{{- else }}
+  <section class="turn turn-{{.Kind}}">
+    <div class="turn-role">{{.Kind}}</div>
+    <div class="prose">{{.HTML}}</div>
+  </section>
+{{- end }}
+{{- end }}
+{{- end}}
