@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#MISE description="Stage the sqlite3.h matching the SQLite that go-sqlite3 bundles"
+#
+# sqlite-vec's cgo bindings compile with -DSQLITE_CORE and `#include
+# "sqlite3.h"`, resolving it from the system. Nothing in the build says which
+# SQLite that is:
+#
+#   macOS SDK          3.51.0
+#   debian bookworm    3.40.1
+#   actually linked    3.53.4  (go-sqlite3's bundled amalgamation)
+#
+# Compiling an extension against an older header than the library it links to
+# is the direction SQLite supports -- the C API only ever grows, so an older
+# header sees a prefix -- which is why this has worked. But the header is an
+# unpinned input that varies per machine, and the mismatch is the kind that
+# fails as corrupted structs rather than as a compile error.
+#
+# go-sqlite3 ships the header for exactly the amalgamation it compiles, so
+# copy that. Derived from go.mod, so it cannot drift from the library: bumping
+# go-sqlite3 restages a new header on the next build.
+set -euo pipefail
+
+dest="${MISE_PROJECT_ROOT:-$PWD}/third_party/sqlite"
+src="$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)"
+
+if [ ! -f "$src/sqlite3-binding.h" ]; then
+  echo "no sqlite3-binding.h in $src" >&2
+  exit 1
+fi
+
+mkdir -p "$dest"
+# sqlite3ext.h too: it is what a non-SQLITE_CORE build would include, and it
+# includes sqlite3.h itself.
+cp "$src/sqlite3-binding.h" "$dest/sqlite3.h"
+cp "$src/sqlite3ext.h" "$dest/sqlite3ext.h"
+
+version=$(sed -n 's/^#define SQLITE_VERSION  *"\(.*\)"/\1/p' "$dest/sqlite3.h")
+echo "staged sqlite3.h $version from $(basename "$src")"

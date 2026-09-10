@@ -15,7 +15,35 @@ omits FTS5 without it and the schema fails at runtime with "no such module:
 fts5". Because it is in the environment, plain `go test` works too.
 
 `pnpm` uses mise's npm backend; the default aqua backend fails pnpm's GitHub
-attestation check.
+attestation check. Its version is pinned equal to `package.json`'s
+`packageManager`, or pnpm re-downloads that version on every invocation.
+
+`mise run test` depends on `ts`: the web package embeds
+`internal/web/static`, and `app.js` is generated, not committed.
+
+CI is Linux and has no GPU, so the semantic tests skip -- see below.
+
+## sqlite3.h
+
+`sqlite-vec`'s cgo bindings compile with `-DSQLITE_CORE` and `#include
+"sqlite3.h"`, taking struct layouts from whatever header the preprocessor
+finds. That is not the library being linked:
+
+| | |
+| --- | --- |
+| macOS SDK | 3.51.0 |
+| debian bookworm | 3.40.1 |
+| **actually linked** | **3.53.4** (go-sqlite3's amalgamation) |
+
+Older header against newer library is the direction SQLite supports, so this
+worked -- but the header was an unpinned input that varied per machine, and
+that class of mismatch corrupts structs rather than failing to compile.
+
+`mise run sqlite-header` copies the header go-sqlite3 ships for its own
+amalgamation into `third_party/sqlite/`, and `CGO_CFLAGS` points there. It is
+derived from `go.mod`, so bumping go-sqlite3 restages it. `build`, `test`, and
+`lint` depend on it, and a test asserts the staged header's version equals
+`sqlite_version()`. Nothing needs `libsqlite3-dev`, including CI.
 
 ## sqlite-lembed
 

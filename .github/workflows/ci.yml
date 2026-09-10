@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No libsqlite3-dev step. sqlite-vec's cgo bindings include sqlite3.h,
+      # but the sqlite-header task stages the one matching the amalgamation
+      # go-sqlite3 actually links, and CGO_CFLAGS points at it -- so the
+      # runner's system headers are neither needed nor consulted.
+
+      # Installs go, node, pnpm, and golangci-lint from mise.toml, and brings
+      # the [env] block with it -- which is where GOFLAGS=-tags=sqlite_fts5
+      # lives. Without that tag the schema fails at runtime with "no such
+      # module: fts5", so CI has to inherit it the same way a developer does
+      # rather than restating it here.
+      - uses: jdx/mise-action@v4
+        with:
+          # mise.toml installs tools through the go: and npm: backends, which
+          # mise gates behind this.
+          experimental: true
+
+      # cgo, for mattn/go-sqlite3 and the sqlite-vec bindings. Slow to compile
+      # and unchanged between runs.
+      - name: Cache Go build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      # gofmt, go vet, golangci-lint, oxlint, tsc, go test. The test task
+      # depends on the TypeScript build, because the web package embeds
+      # internal/web/static and app.js is generated rather than committed.
+      - run: mise run check
+
+      - name: Build
+        run: mise run build
+
+      # The binary has to start and report its own configuration. This is
+      # where a missing FTS5 build tag or a broken embed directive shows up,
+      # neither of which any test would catch.
+      - name: Smoke test
+        run: ./spireweb info

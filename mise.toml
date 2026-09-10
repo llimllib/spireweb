@@ -3,7 +3,12 @@ go = "1.26"
 node = "24"
 # npm backend rather than the default aqua one: aqua verifies pnpm's GitHub
 # artifact attestations, which currently fail against pnpm's release workflow.
-"npm:pnpm" = "latest"
+#
+# Pinned, and kept equal to package.json's packageManager field. With "latest"
+# the two disagree, and pnpm quietly downloads the pinned version at every
+# invocation to honour packageManager -- reproducible, but an undeclared
+# network fetch in the middle of CI.
+"npm:pnpm" = "10.15.0"
 golangci-lint = "latest"
 "go:github.com/bokwoon95/wgo" = "latest"
 
@@ -17,6 +22,17 @@ GOFLAGS = "-tags=sqlite_fts5"
 # Where the embedding model and the sqlite-lembed extension are installed.
 SPIREWEB_DATA_DIR = "{{env.HOME}}/.local/share/spireweb"
 
+# Compile sqlite-vec against the header for the SQLite that actually gets
+# linked, rather than whatever the machine has in /usr/include. See
+# mise-tasks/sqlite-header. Pointing at a directory that does not exist yet is
+# harmless; the build task stages it first.
+CGO_CFLAGS = "-I{{config_root}}/third_party/sqlite"
+
+[tasks.sqlite-header]
+description = "Stage sqlite3.h matching go-sqlite3's bundled amalgamation"
+sources = ["go.sum"]
+outputs = ["third_party/sqlite/sqlite3.h"]
+
 [tasks.ts]
 description = "Compile TypeScript to web/static/app.js"
 run = "pnpm exec tsc"
@@ -25,11 +41,17 @@ outputs = ["internal/web/static/app.js"]
 
 [tasks.build]
 description = "Build the spireweb binary"
-depends = ["ts"]
-run = 'go build -ldflags "-X main.Version=$(git describe --tags --dirty 2>/dev/null)" -o spireweb ./cmd/spireweb'
+depends = ["ts", "sqlite-header"]
+# git describe fails in a repository with no tags, and an empty -X value sets
+# Version to the empty string rather than leaving the source default.
+run = 'go build -ldflags "-X main.Version=$(git describe --tags --dirty 2>/dev/null || echo dev)" -o spireweb ./cmd/spireweb'
 
 [tasks.test]
 description = "Run the Go test suite"
+# The web package embeds internal/web/static, and app.js is generated rather
+# than committed. Without this a fresh clone fails the test asserting the
+# app's own script is served -- as CI did, before this line.
+depends = ["ts", "sqlite-header"]
 run = "go test ./..."
 
 [tasks.fmt]
@@ -38,6 +60,7 @@ run = "gofmt -l -w ."
 
 [tasks.lint]
 description = "Vet, lint, and typecheck"
+depends = ["sqlite-header"]
 run = ["go vet ./...", "golangci-lint run", "pnpm exec oxlint internal/web/ts", "pnpm exec tsc --noEmit"]
 
 [tasks.gofmt-check]
