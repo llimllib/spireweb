@@ -34,6 +34,10 @@ type Progress struct {
 	Current  string // file being worked on
 	Finished bool
 	Err      error
+
+	// Backfill reports that the run was promoted to a full reindex in order to
+	// embed chunks that were indexed without vectors.
+	Backfill bool
 }
 
 // BuildOptions configures a Build run.
@@ -82,6 +86,22 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		}
 	}
 
+	// An index built lexically would otherwise never gain vectors: the skip
+	// test compares mtime and size, so an unchanged file is passed over before
+	// the embedder is ever consulted, and semantic search stays empty however
+	// many times indexing runs. Promote the run to a full pass instead.
+	// Unchanged chunks that already have vectors are still reused, so this
+	// embeds what is missing rather than everything.
+	backfill := false
+	if opts.Embedder != nil && !opts.Full {
+		var err error
+		backfill, err = d.needsVectors()
+		if err != nil {
+			return Progress{Err: err}, err
+		}
+		opts.Full = backfill
+	}
+
 	files, err := session.Discover(opts.Dir)
 	if err != nil {
 		return Progress{Err: err}, fmt.Errorf("discover %s: %w", opts.Dir, err)
@@ -92,7 +112,7 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		return Progress{Err: err}, err
 	}
 
-	p := Progress{Total: len(files)}
+	p := Progress{Total: len(files), Backfill: backfill}
 	seen := make(map[string]bool, len(files))
 
 	for _, f := range files {
@@ -445,6 +465,25 @@ func (d *DB) deleteByPath(path string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// needsVectors reports whether any chunk lacks an embedding.
+func (d *DB) needsVectors() (bool, error) {
+	var n int
+	err := d.sql.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chunks_vec'`).Scan(&n)
+	if err != nil || n == 0 {
+		return false, err
+	}
+	var missing bool
+	err = d.sql.QueryRow(`SELECT EXISTS(
+		SELECT 1 FROM chunks c
+		WHERE NOT EXISTS (SELECT 1 FROM chunks_vec v WHERE v.rowid = c.id))`).Scan(&missing)
+	if err != nil {
+		// The table exists but is unreadable without the extension loaded.
+		return false, nil
+	}
+	return missing, nil
 }
 
 // checkEmbedder refuses to add vectors from one model to an index built with

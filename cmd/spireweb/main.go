@@ -24,6 +24,7 @@ const usage = `spireweb - search and read pi agent sessions
 usage:
   spireweb index [flags]   build or update the search index
   spireweb stats [flags]   report what is in the index
+  spireweb doctor [flags]  check the index for inconsistencies
   spireweb info            show paths and configuration
   spireweb version
 
@@ -56,6 +57,9 @@ func main() {
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
 		err = runStats(*dbPath)
+	case "doctor":
+		_ = fs.Parse(os.Args[2:])
+		err = runDoctor(*dbPath)
 	case "info":
 		_ = fs.Parse(os.Args[2:])
 		err = runInfo(*dbPath, *dir)
@@ -144,6 +148,7 @@ func runIndex(dbPath, dir string, full, lexical bool) error {
 
 	start := time.Now()
 	var lastReport time.Time
+	var announcedBackfill bool
 	p, err := index.Build(ctx, db, index.BuildOptions{
 		Dir:      dir,
 		Full:     full,
@@ -151,6 +156,10 @@ func runIndex(dbPath, dir string, full, lexical bool) error {
 		OnProgress: func(p index.Progress) {
 			// Rate-limited because a skipped file takes microseconds and
 			// printing every one of them costs more than the indexing does.
+			if p.Backfill && !announcedBackfill {
+				announcedBackfill = true
+				note("index has chunks without embeddings; reindexing in full to add them")
+			}
 			if !p.Finished && time.Since(lastReport) < 100*time.Millisecond {
 				return
 			}
@@ -183,7 +192,17 @@ func runIndex(dbPath, dir string, full, lexical bool) error {
 }
 
 func runStats(dbPath string) error {
-	db, err := index.OpenReader(dbPath, index.DriverName)
+	// Prefer the semantic driver: chunks_vec is a vec0 virtual table, and
+	// without the extension loaded it is not readable, so a plain reader would
+	// report an index full of embeddings as having none.
+	driver := index.DriverName
+	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err == nil {
+		driver = index.SemanticDriverName
+	}
+	db, err := index.OpenReader(dbPath, driver)
+	if err != nil && driver != index.DriverName {
+		db, err = index.OpenReader(dbPath, index.DriverName)
+	}
 	if err != nil {
 		return err
 	}
@@ -201,6 +220,54 @@ func runStats(dbPath string) error {
 	}
 	if fi, err := os.Stat(dbPath); err == nil {
 		fmt.Printf("size      %.1f MB\n", float64(fi.Size())/(1<<20))
+	}
+	return nil
+}
+
+// runDoctor checks the invariants that indexing can silently violate.
+//
+// chunks_fts is an external-content FTS5 table and chunks_vec is a virtual
+// table, and neither participates in foreign-key cascades. Deleting a chunk
+// without also deleting its index rows leaves search returning hits that point
+// at rows which no longer exist. Nothing detects that at query time, so it has
+// to be checked directly -- and it cannot be checked with the sqlite3 CLI,
+// because chunks_vec is unreadable without the extension this binary links in.
+func runDoctor(dbPath string) error {
+	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err != nil {
+		return fmt.Errorf("doctor needs the extension to read chunks_vec: %w", err)
+	}
+	db, err := index.OpenReader(dbPath, index.SemanticDriverName)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	checks := []struct{ name, sql string }{
+		{"vectors with no chunk", `SELECT COUNT(*) FROM chunks_vec v
+			WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.id = v.rowid)`},
+		{"chunks with no vector", `SELECT COUNT(*) FROM chunks c
+			WHERE NOT EXISTS (SELECT 1 FROM chunks_vec v WHERE v.rowid = c.id)`},
+		{"chunks with no session", `SELECT COUNT(*) FROM chunks c
+			WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = c.session_id)`},
+		{"fts rows minus chunks", `SELECT ABS((SELECT COUNT(*) FROM chunks_fts) -
+			(SELECT COUNT(*) FROM chunks))`},
+	}
+
+	bad := 0
+	for _, c := range checks {
+		var n int
+		if err := db.SQL().QueryRow(c.sql).Scan(&n); err != nil {
+			return fmt.Errorf("%s: %w", c.name, err)
+		}
+		status := "ok"
+		if n != 0 {
+			status = "FAIL"
+			bad++
+		}
+		fmt.Printf("%-24s %7d  %s\n", c.name, n, status)
+	}
+	if bad > 0 {
+		return fmt.Errorf("%d checks failed; rebuild with 'spireweb index --full'", bad)
 	}
 	return nil
 }

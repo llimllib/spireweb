@@ -1,0 +1,17 @@
+{
+  "//": "Allow Apple's on-device NaturalLanguage embedding models (NLContextualEmbedding).",
+  "//2": "These are local XPC services, not network access. mobileassetd resolves the",
+  "//3": "model asset on disk; languageassetd/naturallanguaged serve the NL model itself;",
+  "//4": "applespell is contacted incidentally by NaturalLanguage on init.",
+  "//5": "Arrays are merged (union) with ~/.pi/agent/extensions/sandbox.json, so this is additive.",
+  "network": {
+    "allowMachLookup": [
+      "com.apple.mobileassetd",
+      "com.apple.mobileassetd.v2",
+      "com.apple.languageassetd",
+      "com.apple.naturallanguaged",
+      "com.apple.applespell",
+      "mul-xpc (Apple)_OpenStep"
+    ]
+  }
+}

@@ -78,12 +78,50 @@ const registerSQL = `INSERT INTO temp.lembed_models(name, model)
 // ranker is skipped, and search quietly degrades to lexical-only.
 func ConnectHook(modelPath string) func(*sqlite3.SQLiteConn) error {
 	return func(conn *sqlite3.SQLiteConn) error {
-		_, err := conn.Exec(registerSQL, []driver.Value{registryName, modelPath})
+		// Registering a model writes a row, and read-only connections set
+		// query_only, which forbids writes to *every* attached database --
+		// including temp, where the registry lives. So the reader pool would
+		// fail here with "attempt to write a readonly database" and lose
+		// semantic search entirely. Lift the restriction for the registration
+		// and put it straight back.
+		restricted, err := queryOnly(conn)
+		if err != nil {
+			return err
+		}
+		if restricted {
+			if err := exec(conn, `PRAGMA query_only=OFF`); err != nil {
+				return err
+			}
+			defer func() { _ = exec(conn, `PRAGMA query_only=ON`) }()
+		}
+
+		_, err = conn.Exec(registerSQL, []driver.Value{registryName, modelPath})
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return registerError(modelPath, err)
 		}
 		return nil
 	}
+}
+
+func exec(conn *sqlite3.SQLiteConn, q string) error {
+	_, err := conn.Exec(q, nil)
+	return err
+}
+
+// queryOnly reports whether this connection has query_only set.
+func queryOnly(conn *sqlite3.SQLiteConn) (bool, error) {
+	rows, err := conn.Query(`PRAGMA query_only`, nil)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	vals := make([]driver.Value, 1)
+	if err := rows.Next(vals); err != nil {
+		return false, err
+	}
+	n, _ := vals[0].(int64)
+	return n != 0, nil
 }
 
 // registerError explains a failed model registration.
@@ -192,8 +230,24 @@ func (e *Embedder) register(ctx context.Context) error {
 		return fmt.Errorf("%w: lembed extension did not load: %v", ErrUnavailable, err)
 	}
 	e.version = version
-	// Usually a no-op: the driver's ConnectHook has already done this. Kept so
-	// an Embedder works against a connection opened without the hook, as tests do.
+
+	// The driver's ConnectHook registers the model on every connection, so
+	// normally there is nothing to do here. Checking first matters because the
+	// reader pool sets query_only, which refuses the INSERT below outright --
+	// registering is a write, even into temp.
+	//
+	// Reading the registry is per-connection and the pool may answer from a
+	// different connection than a later query uses. That is fine precisely
+	// because the hook registers on all of them: the question being asked is
+	// "did the hook run", not "is this particular connection ready".
+	var n int
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM temp.lembed_models WHERE name = ?`, registryName).Scan(&n); err == nil && n > 0 {
+		e.registered = true
+		return nil
+	}
+
+	// No hook: a connection opened with a plain driver, as tests do.
 	_, err := e.db.ExecContext(ctx, registerSQL, registryName, e.modelPath)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
