@@ -21,18 +21,30 @@
 set -euo pipefail
 
 dest="${MISE_PROJECT_ROOT:-$PWD}/third_party/sqlite"
+
+# go list reports an empty Dir for a module that is not in the local cache,
+# which is the state of a fresh CI checkout. Downloading first is a no-op
+# once it is there.
+go mod download github.com/mattn/go-sqlite3
 src="$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)"
 
+if [ -z "$src" ]; then
+  echo "go list gave no directory for github.com/mattn/go-sqlite3" >&2
+  exit 1
+fi
 if [ ! -f "$src/sqlite3-binding.h" ]; then
   echo "no sqlite3-binding.h in $src" >&2
   exit 1
 fi
 
 mkdir -p "$dest"
-# sqlite3ext.h too: it is what a non-SQLITE_CORE build would include, and it
-# includes sqlite3.h itself.
-cp "$src/sqlite3-binding.h" "$dest/sqlite3.h"
-cp "$src/sqlite3ext.h" "$dest/sqlite3ext.h"
+# install rather than cp: the module cache is read-only (0444), and cp would
+# inherit that mode and then fail to overwrite it on the next run.
+#
+# sqlite3ext.h comes along too. It is what a build without SQLITE_CORE would
+# include, and it includes sqlite3.h itself.
+install -m 0644 "$src/sqlite3-binding.h" "$dest/sqlite3.h"
+install -m 0644 "$src/sqlite3ext.h" "$dest/sqlite3ext.h"
 
 version=$(sed -n 's/^#define SQLITE_VERSION  *"\(.*\)"/\1/p' "$dest/sqlite3.h")
 echo "staged sqlite3.h $version from $(basename "$src")"
