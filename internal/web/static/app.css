@@ -474,3 +474,105 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .status-dot { animation: none; }
 }
+
+/* ---------- keyboard ---------- */
+
+/* The keyboard cursor is real focus on a real link, so this is what makes it
+   visible. :focus-visible alone would hide it, because the browser treats a
+   programmatic focus() after a click as not keyboard-initiated. */
+.row:focus {
+  outline: none;
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--bg-raised);
+}
+
+.row.is-selected:focus {
+  box-shadow: inset 3px 0 0 var(--fg);
+  background: var(--accent);
+}
+
+.help-hint {
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-hint:hover { color: var(--fg); border-color: var(--fg-muted); }
+
+#help {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  padding: var(--space-md) var(--space-lg);
+  max-width: 26rem;
+}
+
+#help::backdrop { background: light-dark(rgb(0 0 0 / 0.25), rgb(0 0 0 / 0.55)); }
+
+#help h2 {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-md);
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2xs) var(--space-md);
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+}
+
+.keys dt { justify-self: end; white-space: nowrap; }
+.keys dd { margin: 0; color: var(--fg-muted); }
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+}
+
+#help button {
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-3xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+/* ---------- empty states ---------- */
+
+.blank {
+  max-width: var(--measure);
+  margin: var(--space-xl) auto;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.blank p { margin: 0 0 var(--space-2xs); }
+.blank-hint { font-size: var(--text-sm); }
+
+.blank code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+}

@@ -45,9 +45,13 @@ type pageData struct {
 	// Transcript is nil when no session is open.
 	Transcript []render.Entry
 
-	// Notice explains an empty or degraded pane: no index yet, or a session
-	// whose file has since been deleted.
+	// Notice explains a degraded reading pane: a session whose file has been
+	// deleted, or one with no conversation in it.
 	Notice string
+
+	// EmptyIndex means there is nothing to browse at all, which needs an
+	// explanation of how to fix it rather than a bare empty pane.
+	EmptyIndex bool
 }
 
 // newPage assembles the list pane, which every full page render needs.
@@ -85,7 +89,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	case data.Searching:
 		data.Notice = "No sessions match that search."
 	default:
-		data.Notice = "No sessions indexed yet. Run `spireweb index`."
+		data.EmptyIndex = true
 	}
 	s.render(w, r, "layout.html", data)
 }

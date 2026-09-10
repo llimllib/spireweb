@@ -138,6 +138,18 @@ so tool output is fetched lazily and nothing needs pagination.
 goldmark runs with raw HTML **disabled**. Session content is arbitrary text
 that routinely contains HTML and JavaScript.
 
+## Keyboard
+
+The cursor is real DOM focus on a row's `<a>`, not a class we track. Focus
+gives scroll-into-view, Enter-to-activate, and screen reader support for
+free. Consequences: rows must be anchors with an `href`, and `.row:focus`
+rather than `:focus-visible` does the styling, because a programmatic
+`focus()` does not always count as keyboard-initiated.
+
+`app.ts` reaches the page through selectors, which nothing type-checks.
+`markup_test.go` pins that contract. It cannot tell whether `j` works -- no
+browser test exists yet.
+
 ## Corpus
 
 1128 files, 258MB, median 95KB, p90 567KB, max 7.2MB; 46k chunks. Useful for

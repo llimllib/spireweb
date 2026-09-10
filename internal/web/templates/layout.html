@@ -14,6 +14,8 @@
 
 <header class="chrome">
   <a class="brand" href="/">spireweb</a>
+  <button type="button" class="help-hint" id="help-open"
+          title="Keyboard shortcuts (?)" aria-haspopup="dialog">?</button>
   {{- /* Submitting normally still works without JavaScript: the action is a
          real page. HTMX only intercepts to swap the rows as you type. */ -}}
   <form class="search" role="search" action="/search" method="get">
@@ -47,6 +49,21 @@
     {{- template "transcript.html" . }}
   </article>
 </main>
+
+{{- /* Native <dialog>: modal behaviour, focus trapping, and Escape all come
+       from the platform. Press ? to open. */ -}}
+<dialog id="help">
+  <h2>Keyboard</h2>
+  <dl class="keys">
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>move down / up the list</dd>
+    <dt><kbd>g</kbd><kbd>g</kbd> / <kbd>G</kbd></dt><dd>first / last session</dd>
+    <dt><kbd>Enter</kbd></dt><dd>open the session</dd>
+    <dt><kbd>/</kbd> or <kbd>⌘K</kbd></dt><dd>search</dd>
+    <dt><kbd>Esc</kbd></dt><dd>leave the search box</dd>
+    <dt><kbd>?</kbd></dt><dd>this list</dd>
+  </dl>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
 
 </body>
 </html>
