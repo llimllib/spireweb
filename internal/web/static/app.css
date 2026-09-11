@@ -175,9 +175,15 @@ body {
   color: var(--accent-fg);
 }
 
-.row.is-selected .row-project,
-.row.is-selected .row-date,
-.row.is-selected .row-preview { color: inherit; opacity: 0.85; }
+/* Set on .row-meta rather than on the spans inside it. `inherit` resolves
+   against the *parent*, and .row-meta is itself muted grey, so inheriting
+   there left the project and date grey on the selection blue -- unreadable,
+   and only on the one row where it mattered. */
+.row.is-selected .row-meta,
+.row.is-selected .row-preview {
+  color: var(--accent-fg);
+  opacity: 0.9;
+}
 
 .row-meta {
   display: flex;
