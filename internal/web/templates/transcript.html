@@ -51,7 +51,8 @@
   {{- /* Anchored by message index, which is what chunks.msg_idx points at,
          so a search hit can be located in the page. Only the first entry of
          a message carries the id; ids must be unique. */ -}}
-  <section class="turn turn-{{.Kind}}"{{if .Anchor}} id="m{{.MsgIdx}}"{{end}}>
+  <section class="turn turn-{{.Kind}}{{if index $.Matches .MsgIdx}} is-match{{end}}"
+           {{- if .Anchor}} id="m{{.MsgIdx}}"{{end}}>
     <div class="turn-role">{{.Kind}}</div>
     <div class="prose">{{.HTML}}</div>
   </section>

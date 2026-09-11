@@ -10,6 +10,7 @@ import (
 
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/render"
+	"github.com/llimllib/spireweb/internal/search"
 )
 
 // listLimit is how many rows the list pane renders.
@@ -44,6 +45,16 @@ type pageData struct {
 
 	// Transcript is nil when no session is open.
 	Transcript []render.Entry
+
+	// Matches holds the message indexes in the open session that matched the
+	// query, for tinting. A map because the template tests membership per
+	// entry with `index`.
+	Matches map[int]bool
+
+	// ScrollTo is the anchor of the message to bring into view, empty when
+	// there is nothing to scroll to. Set even when Matches is empty: a purely
+	// semantic hit can be located without any term having been found in it.
+	ScrollTo string
 
 	// Notice explains a degraded reading pane: a session whose file has been
 	// deleted, or one with no conversation in it.
@@ -85,7 +96,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// best match when searching, which is the one you were looking for.
 	switch {
 	case len(data.Sessions) > 0:
-		s.loadTranscript(&data, data.Sessions[0].Summary)
+		s.loadTranscript(r, &data, data.Sessions[0].Summary)
 	case data.Searching:
 		data.Notice = "No sessions match that search."
 	default:
@@ -112,7 +123,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.loadTranscript(&data, selected)
+	s.loadTranscript(r, &data, selected)
 	s.render(w, r, "layout.html", data)
 }
 
@@ -140,7 +151,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // A missing file is reported in place rather than as an error page: the index
 // is a cache of what was on disk when it last ran, and a session deleted since
 // then should still show its metadata and say what happened.
-func (s *Server) loadTranscript(data *pageData, sum index.Summary) {
+func (s *Server) loadTranscript(r *http.Request, data *pageData, sum index.Summary) {
 	data.Selected = &sum
 
 	parsed, err := s.cache.Get(sum.Path)
@@ -155,8 +166,80 @@ func (s *Server) loadTranscript(data *pageData, sum index.Summary) {
 	data.Transcript = render.Transcript(parsed)
 	if len(data.Transcript) == 0 {
 		data.Notice = "This session has no conversation in it."
+		return
+	}
+	s.locateMatches(r, data, sum)
+}
+
+// locateMatches works out which messages in the open session matched, and
+// which one to scroll to.
+//
+// Every failure here is silent. This decorates a page that is already correct
+// without it, and a search that cannot say where the match is should still
+// show the session.
+func (s *Server) locateMatches(r *http.Request, data *pageData, sum index.Summary) {
+	if strings.TrimSpace(data.Query) == "" || s.engine == nil {
+		return
+	}
+
+	// Only messages that actually rendered can be scrolled to. The transcript
+	// is parsed from the file while the match came from the index, so a session
+	// that shrank since it was indexed can name a message that is not there.
+	anchored := make(map[int]bool, len(data.Transcript))
+	for _, e := range data.Transcript {
+		if e.Anchor {
+			anchored[e.MsgIdx] = true
+		}
+	}
+
+	idxs, err := search.MessagesMatching(
+		r.Context(), s.db.SQL(), sum.ID, data.Query, search.MaxMessageMatches)
+	if err != nil {
+		return
+	}
+
+	if len(idxs) == 0 {
+		// A hit with no terms in it: semantic ranking found this session, so
+		// scroll to the chunk it scored and tint nothing, which says "here"
+		// without claiming a word matched.
+		best, ok := data.bestChunkFor(sum.ID)
+		if !ok {
+			return
+		}
+		if idx, err := search.ChunkMessage(r.Context(), s.db.SQL(), best); err == nil && anchored[idx] {
+			data.ScrollTo = anchorID(idx)
+		}
+		return
+	}
+
+	data.Matches = make(map[int]bool, len(idxs))
+	for _, idx := range idxs {
+		if anchored[idx] {
+			data.Matches[idx] = true
+		}
+	}
+	for _, idx := range idxs {
+		if anchored[idx] {
+			data.ScrollTo = anchorID(idx) // best-ranked first
+			break
+		}
 	}
 }
+
+// bestChunkFor finds the highest-scoring chunk for a session among the results
+// the list pane already computed, rather than ranking it again.
+func (d pageData) bestChunkFor(sessionID string) (search.ChunkID, bool) {
+	for _, row := range d.Sessions {
+		if row.ID == sessionID {
+			return row.BestChunk, row.BestChunk != 0
+		}
+	}
+	return 0, false
+}
+
+// anchorID is the id render puts on a message. One function so the two sides
+// cannot disagree about the format.
+func anchorID(msgIdx int) string { return "m" + strconv.Itoa(msgIdx) }
 
 // handleTool returns one tool call's arguments and output.
 //

@@ -45,7 +45,10 @@
     {{- template "list.html" . }}
   </nav>
 
-  <article class="reading">
+  {{- /* data-scroll-to rather than a #m12 URL fragment: a fragment would put
+         a scroll position into every shared link, and fight both the history
+         restore and the list pane's own saved position. */ -}}
+  <article class="reading"{{with .ScrollTo}} data-scroll-to="{{.}}"{{end}}>
     {{- template "transcript.html" . }}
   </article>
 </main>

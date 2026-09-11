@@ -31,6 +31,11 @@ const excerptTokens = 28
 type row struct {
 	index.Summary
 	Excerpt string
+
+	// BestChunk is the highest-scoring matching chunk, kept so that opening
+	// this result can locate the hit inside the session without running the
+	// ranking a second time. Zero when browsing.
+	BestChunk search.ChunkID
 }
 
 // Subtitle overrides index.Summary.Subtitle for search results, replacing the
@@ -72,7 +77,7 @@ func (s *Server) rowsFor(ctx context.Context, q string) ([]row, error) {
 
 	rows := make([]row, 0, len(results))
 	for _, res := range results {
-		r := row{Summary: res.Summary}
+		r := row{Summary: res.Summary, BestChunk: res.BestChunk}
 		// One extra query per row. At the result limit that is a bounded
 		// number of indexed lookups, tens of microseconds each, and it buys
 		// the single most useful thing a result can show.

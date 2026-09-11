@@ -507,3 +507,86 @@ func TestTranscriptAnchorsAreUnique(t *testing.T) {
 		t.Error("no #m1 on the tool call")
 	}
 }
+
+// Opening a result used to land at the top of a session that might be
+// hundreds of messages long, with nothing to say why it matched.
+func TestSearchResultScrollsToItsMatch(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {
+			userMsg("let us talk about the weather"),
+			assistantMsg("it is raining"),
+			userMsg("the database deadlocked during deploy"),
+			assistantMsg("that is a lock ordering problem"),
+		},
+	})
+
+	_, doc := f.get(t, "/sessions/aaa?q=deadlocked")
+
+	// The matching message is message 2, and it is the one to scroll to.
+	target, ok := doc.Find(".reading").Attr("data-scroll-to")
+	if !ok {
+		t.Fatal("no data-scroll-to on the reading pane")
+	}
+	if target != "m2" {
+		t.Errorf("data-scroll-to = %q, want m2", target)
+	}
+	// It must name an element that exists, or the scroll silently does nothing.
+	if doc.Find("#"+target).Length() != 1 {
+		t.Errorf("data-scroll-to points at #%s, which is not in the page", target)
+	}
+
+	// Tinted, and only the message that matched.
+	matches := doc.Find(".turn.is-match")
+	if matches.Length() != 1 {
+		t.Fatalf("tinted turns = %d, want 1", matches.Length())
+	}
+	if id, _ := matches.Attr("id"); id != "m2" {
+		t.Errorf("tinted turn = %q, want m2", id)
+	}
+}
+
+// Browsing is not searching: without a query there is no match to scroll to,
+// and the attribute must be absent rather than empty.
+func TestBrowsingHasNoScrollTarget(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("the database deadlocked")}})
+
+	_, doc := f.get(t, "/sessions/aaa")
+	if _, ok := doc.Find(".reading").Attr("data-scroll-to"); ok {
+		t.Error("data-scroll-to set while browsing")
+	}
+	if n := doc.Find(".turn.is-match").Length(); n != 0 {
+		t.Errorf("tinted turns = %d while browsing, want 0", n)
+	}
+}
+
+// A query whose terms are nowhere in the session -- which is what a purely
+// semantic hit looks like -- must not invent a highlight.
+func TestUnmatchedQueryTintsNothing(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("the database deadlocked")}})
+
+	_, doc := f.get(t, "/sessions/aaa?q=xylophone")
+	if n := doc.Find(".turn.is-match").Length(); n != 0 {
+		t.Errorf("tinted turns = %d, want 0 when no term matched", n)
+	}
+}
+
+// Several messages can match; all of them are marked, and the scroll goes to
+// the best-ranked one rather than the first in the file.
+func TestAllMatchingMessagesAreMarked(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {
+			userMsg("a passing mention of deploy"),
+			assistantMsg("unrelated"),
+			userMsg("deploy deploy deploy the deploy broke during deploy"),
+		},
+	})
+
+	_, doc := f.get(t, "/sessions/aaa?q=deploy")
+	if n := doc.Find(".turn.is-match").Length(); n != 2 {
+		t.Errorf("tinted turns = %d, want 2", n)
+	}
+	// BM25 puts the message that is mostly the term ahead of the aside.
+	if target, _ := doc.Find(".reading").Attr("data-scroll-to"); target != "m2" {
+		t.Errorf("data-scroll-to = %q, want m2, the strongest match", target)
+	}
+}

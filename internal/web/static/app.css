@@ -293,6 +293,13 @@ body {
 .turn-user { background: var(--user-bg); }
 .turn-thinking { opacity: 0.75; font-style: italic; }
 
+/* The message a search opened this session for. A rule on the edge rather
+   than a wash over the text: the turn backgrounds already carry role, and a
+   second tint on top of them would say two things with one channel. */
+.turn.is-match {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .turn-role {
   font-size: var(--text-xs);
   font-weight: 600;

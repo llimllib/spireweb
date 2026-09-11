@@ -126,6 +126,35 @@ function restoreScroll(): void {
   if (Number.isFinite(top)) pane.scrollTop = top;
 }
 
+// --------------------------------------------------------------- match scroll
+
+/**
+ * Opening a search result lands at the top of a session that may be hundreds
+ * of messages long, so the server names the message that matched and we bring
+ * it into view.
+ *
+ * Nothing happens when the attribute is absent, which is the browsing case and
+ * the case where a match could not be located.
+ */
+function scrollToMatch(): void {
+  const pane = document.querySelector<HTMLElement>(".reading");
+  const id = pane?.dataset.scrollTo;
+  if (!pane || !id) return;
+
+  // getElementById rather than querySelector(`#${id}`), which would treat the
+  // value as a selector and throw on anything that is not a valid one.
+  const target = document.getElementById(id);
+  if (!target) return;
+
+  // Centre a match that fits, so it reads with the message before it. A match
+  // taller than the pane cannot be centred -- that puts its first line above
+  // the fold and lands the reader mid-sentence -- so show its top, nudged down
+  // far enough to be visibly not the start of the session.
+  const fits = target.getBoundingClientRect().height < pane.clientHeight;
+  target.scrollIntoView({ block: fits ? "center" : "start" });
+  if (!fits) pane.scrollBy(0, -16);
+}
+
 // ------------------------------------------------------------------ bindings
 
 // gg, as in vim: g is a prefix, and only a second g within the timeout acts.
@@ -213,6 +242,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 function init(): void {
   restoreScroll();
+  scrollToMatch();
 
   document.addEventListener("keydown", onKeydown);
 

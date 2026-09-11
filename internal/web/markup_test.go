@@ -58,6 +58,11 @@ func TestMarkupContractForKeyboardNavigation(t *testing.T) {
 	if doc.Find("#rows").Length() != 1 {
 		t.Error("no #rows container")
 	}
+
+	// scrollToMatch reads the target off this element.
+	if doc.Find("article.reading").Length() != 1 {
+		t.Error("no article.reading for the match scroll to read data-scroll-to from")
+	}
 }
 
 // The help sheet is the only discovery mechanism for j/k, so it should
