@@ -57,6 +57,13 @@
   --accent-fg: light-dark(#fff, #fff);
   --user-bg: light-dark(#f0f4fa, #262b33);
   --danger: light-dark(#b3261e, #f2857c);
+
+  /* Diff tints, dark enough to read text on and light enough not to shout.
+     Colour is never the only signal: every line keeps its +/- marker. */
+  --diff-add-bg: light-dark(#e6ffec, #17351f);
+  --diff-add-fg: light-dark(#04561f, #96e0ac);
+  --diff-del-bg: light-dark(#ffebe9, #401a1c);
+  --diff-del-fg: light-dark(#8b1a12, #f0a49c);
 }
 
 * { box-sizing: border-box; }
@@ -261,6 +268,13 @@ body {
   color: var(--fg-muted);
 }
 
+/* The session id is here to be copied into a terminal, so one click takes all
+   of it: a uuid is four hyphen-separated words to a double-click. */
+.reading-id {
+  font-family: var(--font-mono);
+  user-select: all;
+}
+
 .turn {
   max-width: var(--measure);
   margin: 0 auto var(--space-md);
@@ -432,6 +446,54 @@ body {
 }
 
 .tool-loading { color: var(--fg-faint); font-size: var(--text-xs); margin: var(--space-2xs) 0; }
+
+/* ---------- diffs ---------- */
+
+.diff {
+  padding: var(--space-2xs) 0;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-code);
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.diff-line {
+  display: flex;
+  gap: var(--space-2xs);
+  padding-right: var(--space-xs);
+}
+
+/* The gutter is scaffolding for reading, not content worth copying: selecting
+   a diff and pasting it should give code, not code with line numbers welded
+   to the front of it. */
+.diff-mark, .diff-num {
+  flex: none;
+  user-select: none;
+  color: var(--fg-faint);
+  text-align: right;
+}
+
+.diff-mark { width: 1ch; padding-left: var(--space-2xs); }
+.diff-num { width: 5ch; }
+
+/* Wrapping rather than scrolling sideways: the reading pane is narrow by
+   design, and a long line is worth reading more than the alignment is worth
+   keeping. Continuations line up under the code because the gutter is a
+   separate flex item. */
+.diff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.diff-line.is-add { background: var(--diff-add-bg); }
+.diff-line.is-add .diff-text { color: var(--diff-add-fg); }
+.diff-line.is-del { background: var(--diff-del-bg); }
+.diff-line.is-del .diff-text { color: var(--diff-del-fg); }
+.diff-line.is-gap .diff-text { color: var(--fg-faint); }
 
 /* ---------- narrow windows ---------- */
 

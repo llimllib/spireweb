@@ -273,3 +273,110 @@ func utf8Valid(s string) bool {
 	}
 	return true
 }
+
+// The diff pi records is the same text its terminal draws: a marker column, a
+// right-aligned file line number, then the line itself.
+func TestParseDiffSplitsColumns(t *testing.T) {
+	details := json.RawMessage(`{"diff":` + quoteJSON(strings.Join([]string{
+		`     ...`,
+		`  45     parse_filters,`,
+		`- 46 from core.api import (`,
+		`+ 46 from core.api import ALLOWED`,
+		`  47 `,
+		`     ...`,
+	}, "\n")) + `,"firstChangedLine":46}`)
+
+	lines, truncated := ParseDiff(details)
+	if truncated {
+		t.Error("a six line diff was reported as clipped")
+	}
+	if len(lines) != 6 {
+		t.Fatalf("got %d lines, want 6", len(lines))
+	}
+
+	want := []DiffLine{
+		{Kind: DiffGap},
+		{Kind: DiffContext, Num: "45", Text: "    parse_filters,"},
+		{Kind: DiffDel, Num: "46", Text: "from core.api import ("},
+		{Kind: DiffAdd, Num: "46", Text: "from core.api import ALLOWED"},
+		{Kind: DiffContext, Num: "47", Text: ""},
+		{Kind: DiffGap},
+	}
+	for i, w := range want {
+		if lines[i] != w {
+			t.Errorf("line %d = %+v, want %+v", i, lines[i], w)
+		}
+	}
+	// Indentation is code, so it survives the split exactly.
+	if lines[1].Text != "    parse_filters," {
+		t.Errorf("indentation lost: %q", lines[1].Text)
+	}
+	// Colour is not the only signal.
+	if lines[2].Mark() != "-" || lines[3].Mark() != "+" {
+		t.Errorf("marks = %q %q", lines[2].Mark(), lines[3].Mark())
+	}
+}
+
+func TestParseDiffIgnoresResultsWithoutOne(t *testing.T) {
+	cases := map[string]string{
+		"failed edit":   `{}`,
+		"another tool":  `{"pattern":"foo","matchCount":3}`,
+		"not an object": `"nope"`,
+	}
+	for name, raw := range cases {
+		if lines, _ := ParseDiff(json.RawMessage(raw)); lines != nil {
+			t.Errorf("%s: got %d lines, want none", name, len(lines))
+		}
+	}
+	if lines, _ := ParseDiff(nil); lines != nil {
+		t.Error("absent details produced lines")
+	}
+}
+
+// An edit's diff says everything its arguments do, with the file's line
+// numbers and its surrounding lines. Showing both would mean scrolling past
+// JSON full of escaped newlines to reach the readable version.
+func TestToolDetailPrefersTheDiffOverArguments(t *testing.T) {
+	s := writeFixture(t,
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"tc1","name":"edit","arguments":{"path":"a.py","edits":[{"oldText":"x = 1","newText":"x = 2"}]}}]}}`,
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"tc1","toolName":"edit","content":[{"type":"text","text":"Successfully replaced 1 block(s) in a.py."}],"details":{"diff":"-  7 x = 1\n+  7 x = 2"}}}`,
+	)
+	d, err := Tool(s, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Diff) != 2 {
+		t.Fatalf("diff = %+v, want two lines", d.Diff)
+	}
+	if d.Args != "" {
+		t.Errorf("args = %q, want the diff to stand alone", d.Args)
+	}
+}
+
+// A failed edit records no diff, and there its arguments are the useful
+// thing: they are the text that could not be found.
+func TestToolDetailKeepsArgumentsWhenAnEditFails(t *testing.T) {
+	s := writeFixture(t,
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"tc1","name":"edit","arguments":{"path":"a.py","edits":[{"oldText":"missing","newText":"x"}]}}]}}`,
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"tc1","toolName":"edit","isError":true,"content":[{"type":"text","text":"Could not find edits[0] in a.py."}],"details":{}}}`,
+	)
+	d, err := Tool(s, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Diff) != 0 {
+		t.Errorf("diff = %+v, want none", d.Diff)
+	}
+	if !strings.Contains(d.Args, "missing") {
+		t.Errorf("args = %q, want the attempted edit shown", d.Args)
+	}
+}
+
+// quoteJSON renders s as a JSON string literal.
+func quoteJSON(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}

@@ -88,6 +88,12 @@ type Message struct {
 	ToolName   string `json:"toolName"`
 	IsError    bool   `json:"isError"`
 
+	// Details is a per-tool payload alongside the textual result: an edit
+	// carries the rendered diff it applied, grep its match count, find its
+	// file count. Kept raw because its shape is the tool's business and a new
+	// tool must not break parsing.
+	Details json.RawMessage `json:"details"`
+
 	// At comes from the record envelope rather than the message body, whose
 	// timestamp field is a string on some roles and a unix milliseconds number
 	// on others.

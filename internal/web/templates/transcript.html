@@ -16,6 +16,10 @@
     <time datetime="{{rfc3339 .StartedAt}}">{{datetime .StartedAt}}</time>
     <span aria-hidden="true">·</span>
     <span>{{.NumMsgs}} messages</span>
+    <span aria-hidden="true">·</span>
+    {{- /* The id is what resumes the session in a terminal, so it is shown in
+           full rather than truncated, and styled to select in one click. */ -}}
+    <code class="reading-id" title="Session id">{{.ID}}</code>
   </p>
 </header>
 {{- end }}

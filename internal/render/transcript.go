@@ -162,6 +162,14 @@ type ToolDetail struct {
 	Output  string
 	IsError bool
 
+	// Diff is the edit this call made, when the tool recorded one. Present
+	// instead of Args rather than alongside it: it is the same information,
+	// with the file's line numbers and surrounding lines, and showing both
+	// would mean scrolling past a JSON blob of escaped newlines to reach the
+	// readable version of it.
+	Diff          []DiffLine
+	DiffTruncated bool
+
 	// Truncated reports that Output was clipped.
 	Truncated bool
 	FullBytes int
@@ -192,6 +200,9 @@ func Tool(s *session.Session, msgIdx, blk int) (ToolDetail, error) {
 
 	if res, ok := s.ToolResults()[call.ID]; ok {
 		d.IsError = res.IsError
+		if d.Diff, d.DiffTruncated = ParseDiff(res.Details); len(d.Diff) > 0 {
+			d.Args = ""
+		}
 		var b strings.Builder
 		for _, rb := range res.Content {
 			switch rb.Type {

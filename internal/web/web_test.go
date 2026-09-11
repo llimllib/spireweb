@@ -400,3 +400,73 @@ func TestStaticAssetsAreServed(t *testing.T) {
 		}
 	}
 }
+
+// The id is how a session is resumed in a terminal, so it has to be somewhere
+// a reader can copy it from.
+func TestTranscriptHeaderShowsSessionID(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("hello there")}})
+
+	_, doc := f.get(t, "/sessions/aaa")
+	if got := strings.TrimSpace(doc.Find(".reading-head .reading-id").Text()); got != "aaa" {
+		t.Errorf("session id in header = %q, want %q", got, "aaa")
+	}
+}
+
+// editResultMsg is an edit's result, carrying the rendered diff pi records
+// alongside the textual outcome.
+func editResultMsg(id, text, diff string) string {
+	return `{"type":"message","timestamp":"2026-03-31T12:26:04.076Z","message":{"role":"toolResult","toolCallId":"` +
+		id + `","toolName":"edit","isError":false,"content":[{"type":"text","text":` + quote(text) +
+		`}],"details":{"diff":` + quote(diff) + `}}}`
+}
+
+// An edit used to expand into its arguments: a JSON blob with the old and new
+// text run together as escaped newlines. The session carries the diff pi drew
+// in the terminal, so show that instead.
+func TestEditToolRendersADiff(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {
+			userMsg("tidy the import"),
+			toolCallMsg("tc1", "edit", `{"path":"a.py","edits":[{"oldText":"import (\n    X,\n)","newText":"import X"}]}`),
+			editResultMsg("tc1", "Successfully replaced 1 block(s) in a.py.",
+				"     ...\n  45 # before\n- 46 import (\n- 47     X,\n- 48 )\n+ 46 import X\n  49 # after"),
+		},
+	})
+
+	rec, doc := f.get(t, "/sessions/aaa/tool/1/0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	if n := doc.Find(".diff-line.is-del").Length(); n != 3 {
+		t.Errorf("removed lines = %d, want 3", n)
+	}
+	if n := doc.Find(".diff-line.is-add").Length(); n != 1 {
+		t.Errorf("added lines = %d, want 1", n)
+	}
+	if n := doc.Find(".diff-line.is-gap").Length(); n != 1 {
+		t.Errorf("gap markers = %d, want 1", n)
+	}
+
+	// Line numbers are the reason to use pi's diff rather than computing one
+	// from the arguments, which cannot know where in the file the edit landed.
+	nums := doc.Find(".diff-line.is-del .diff-num").Map(func(_ int, s *goquery.Selection) string {
+		return strings.TrimSpace(s.Text())
+	})
+	if strings.Join(nums, ",") != "46,47,48" {
+		t.Errorf("line numbers = %v, want 46,47,48", nums)
+	}
+
+	// The marker is real text, so the diff still reads without colour.
+	if got := strings.TrimSpace(doc.Find(".diff-line.is-add .diff-mark").First().Text()); got != "+" {
+		t.Errorf("marker = %q, want +", got)
+	}
+
+	// And the arguments are gone: the diff says all of it, readably.
+	if doc.Find(".tool-args").Length() != 0 {
+		t.Error("arguments still rendered alongside the diff")
+	}
+	if strings.Contains(rec.Body.String(), `oldText`) {
+		t.Error("raw edit arguments leaked into the fragment")
+	}
+}

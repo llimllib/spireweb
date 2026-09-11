@@ -1,4 +1,24 @@
 {{define "tooldetail.html" -}}
+{{- with .Diff }}
+<div class="tool-section">
+  <h4>diff</h4>
+  {{- /* One element per line so a changed line can be tinted across the full
+         width. The marker and line number are real text, not just colour, so
+         the diff still reads in a screen reader -- CSS keeps them out of a
+         copied selection. */ -}}
+  <div class="diff">
+    {{- range . }}
+    <div class="diff-line is-{{.Kind}}"><span
+      class="diff-mark">{{.Mark}}</span><span
+      class="diff-num">{{.Num}}</span><span
+      class="diff-text">{{if eq .Kind "gap"}}…{{else}}{{.Text}}{{end}}</span></div>
+    {{- end }}
+  </div>
+  {{- if $.DiffTruncated }}
+  <p class="tool-clipped">Clipped: the diff is longer than this.</p>
+  {{- end }}
+</div>
+{{- end }}
 {{- with .Args }}
 <div class="tool-section">
   <h4>arguments</h4>

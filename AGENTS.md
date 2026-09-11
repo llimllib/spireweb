@@ -174,6 +174,15 @@ so tool output is fetched lazily and nothing needs pagination.
 goldmark runs with raw HTML **disabled**. Session content is arbitrary text
 that routinely contains HTML and JavaScript.
 
+A `toolResult` carries a per-tool `details` object, and an edit's holds the
+diff pi drew in the terminal -- markers, file line numbers, context, `...`
+gaps -- under `details.diff`. Render that rather than computing one: the call's
+arguments hold only the old and new text, so a diff derived from them could
+never say *where* in the file the edit landed, and the line numbers are most of
+what makes a diff readable. When a diff is present the arguments are hidden,
+because they are the same edit as escaped JSON. A failed edit has `details:
+{}`, and there the arguments are the useful part: the text that was not found.
+
 ## Keyboard
 
 The cursor is real DOM focus on a row's `<a>`, not a class we track. Focus
