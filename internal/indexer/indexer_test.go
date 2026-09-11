@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/llimllib/spireweb/internal/index"
+	"github.com/llimllib/spireweb/internal/titles"
 )
 
 func writeSession(t *testing.T, dir, id, text string) string {
@@ -58,7 +59,7 @@ func TestRunCatchesUpThenStops(t *testing.T) {
 	writeSession(t, dir, "aaa", "first")
 	writeSession(t, dir, "bbb", "second")
 
-	ix := New(openWriter(t), index.BuildOptions{Dir: dir})
+	ix := New(openWriter(t), index.BuildOptions{Dir: dir}, titles.Options{})
 	if err := ix.Run(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestWatchIndexesNewSessions(t *testing.T) {
 	writeSession(t, dir, "aaa", "the original session")
 
 	db := openWriter(t)
-	ix := New(db, index.BuildOptions{Dir: dir})
+	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -133,7 +134,7 @@ func TestWatchNoticesDeletedSessions(t *testing.T) {
 	dir := t.TempDir()
 	p := writeSession(t, dir, "aaa", "a doomed session")
 
-	ix := New(openWriter(t), index.BuildOptions{Dir: dir})
+	ix := New(openWriter(t), index.BuildOptions{Dir: dir}, titles.Options{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = ix.Run(ctx, true) }()
@@ -153,7 +154,8 @@ func TestWatchNoticesDeletedSessions(t *testing.T) {
 // A build failure has to leave the status readable rather than wedged as
 // busy, or the header claims it is indexing for as long as the tab is open.
 func TestBuildFailureIsReported(t *testing.T) {
-	ix := New(openWriter(t), index.BuildOptions{Dir: filepath.Join(t.TempDir(), "missing")})
+	ix := New(openWriter(t), index.BuildOptions{Dir: filepath.Join(t.TempDir(), "missing")},
+		titles.Options{})
 
 	if err := ix.Run(context.Background(), false); err == nil {
 		t.Fatal("expected an error for a nonexistent session directory")
@@ -167,5 +169,70 @@ func TestBuildFailureIsReported(t *testing.T) {
 	}
 	if st.Busy() {
 		t.Error("still busy after failing")
+	}
+}
+
+// stubSummarizer records the phase the indexer was reporting while it ran, so
+// the test can tell that titling is announced as its own thing rather than
+// hiding inside "indexing".
+type stubSummarizer struct {
+	ix        *Indexer
+	seenPhase Phase
+}
+
+func (s *stubSummarizer) Name() string { return "stub" }
+
+func (s *stubSummarizer) Summarize(ctx context.Context, slice string) (string, error) {
+	s.seenPhase = s.ix.Status().Phase
+	return "A title for " + slice[:5], nil
+}
+
+// Titles are generated after the catch-up build, on the same connection and
+// never alongside it.
+func TestRunGeneratesTitlesAfterTheBuild(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, "aaa", "how do I center a div")
+
+	db := openWriter(t)
+	stub := &stubSummarizer{}
+	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{Summarizer: stub})
+	stub.ix = ix
+
+	if err := ix.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := db.Session(context.Background(), "aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Title == "" {
+		t.Error("session has no title")
+	}
+	if stub.seenPhase != PhaseTitling {
+		t.Errorf("phase during summarizing = %q, want %q", stub.seenPhase, PhaseTitling)
+	}
+	if st := ix.Status(); st.TitleErr != "" {
+		t.Errorf("TitleErr = %q", st.TitleErr)
+	}
+}
+
+// A session with no summarizer configured -- no API key, the common case --
+// indexes exactly as it did before titles existed.
+func TestRunWithoutSummarizerSkipsTitling(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, "aaa", "how do I center a div")
+
+	db := openWriter(t)
+	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{})
+	if err := ix.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	s, err := db.Session(context.Background(), "aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Heading() != "how do I center a div" {
+		t.Errorf("heading = %q, want the opening message", s.Heading())
 	}
 }

@@ -29,6 +29,7 @@ func TestStatusPollsFasterWhileIndexing(t *testing.T) {
 	}{
 		{indexer.PhaseIndexing, pollBusy},
 		{indexer.PhaseStarting, pollBusy},
+		{indexer.PhaseTitling, pollBusy},
 		{indexer.PhaseWatching, pollIdle},
 		{indexer.PhaseStopped, pollIdle},
 	}
@@ -59,6 +60,19 @@ func TestStatusShowsProgressWhileIndexing(t *testing.T) {
 	_, doc := f.get(t, "/status")
 	text := strings.Join(strings.Fields(doc.Find("#status").Text()), " ")
 	if !strings.Contains(text, "indexing 42/100") {
+		t.Errorf("status text = %q", text)
+	}
+}
+
+// Titling is slow enough that saying "indexing" and then going quiet for a
+// minute would look like a hang.
+func TestStatusDistinguishesTitlingFromIndexing(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("hi")}})
+	f.withIndexer(t, indexer.Status{Phase: indexer.PhaseTitling, Done: 7, Total: 30})
+
+	_, doc := f.get(t, "/status")
+	text := strings.Join(strings.Fields(doc.Find("#status").Text()), " ")
+	if !strings.Contains(text, "titling 7/30") {
 		t.Errorf("status text = %q", text)
 	}
 }

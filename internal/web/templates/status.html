@@ -8,7 +8,7 @@
      hx-swap="outerHTML">
   {{- if .Status.Busy }}
   <span class="status-dot" aria-hidden="true"></span>
-  <span>indexing{{if .Status.Total}} {{.Status.Done}}/{{.Status.Total}}{{end}}</span>
+  <span>{{if eq .Status.Phase "titling"}}titling{{else}}indexing{{end}}{{if .Status.Total}} {{.Status.Done}}/{{.Status.Total}}{{end}}</span>
   {{- else if .New }}
   <a href="/">{{.New}} new session{{if ne .New 1}}s{{end}}</a>
   {{- else if .Status.LastErr }}

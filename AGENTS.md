@@ -132,6 +132,38 @@ Rankers are chosen once, at startup, so nothing there may depend on index
 keyword-only for its whole life. The semantic ranker is attached whenever the
 model loads, and returns nothing until vectors exist.
 
+## Titles
+
+`sessions.title` is written by `internal/titles`, a pass that runs *after* a
+build and never during one: both write, and the writer is one connection. It
+needs `ANTHROPIC_API_KEY`; without it the pass is skipped with a note, and
+every row falls back to its opening message, which is what the list did for
+five milestones. `ANTHROPIC_BASE_URL` points it at a fake or a gateway.
+
+Two columns decide whether a session is paid for again, and they guard
+different costs:
+
+- `title_msgs` guards the **parse**. It is `n_msgs` as of the last time the
+  pass looked. Without it, every run would parse all 1128 files to discover
+  that nothing moved.
+- `title_key` guards the **API call**. It hashes a bounded prefix of the
+  conversation -- and that prefix is quantized to `keySteps`, so the hash moves
+  when a session roughly doubles rather than on every message. Sessions are
+  append-only and get reindexed per message; hashing the prose directly would
+  re-summarize a live session continuously, which is the whole failure this is
+  built to avoid.
+
+A failure writes **neither**, so the row keeps its fallback and the next run
+retries it. `MarkTitleChecked` writes only `title_msgs`, which is how a session
+with no prose at all settles without ever getting a title.
+
+Both columns are added by `migrate()` (`ALTER TABLE ADD COLUMN`), not by
+`schema`. Bumping `SchemaVersion` would have discarded the database and
+re-embedded 46k chunks to gain two nullable columns.
+
+`--titles N` caps a run. The corpus is on the order of a dollar all at once, so
+a trial run over the newest few is worth having.
+
 ## Rendering
 
 Transcripts are parsed from the `.jsonl` on demand, not stored. The DB is a

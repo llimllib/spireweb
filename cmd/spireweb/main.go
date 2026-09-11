@@ -14,6 +14,7 @@ import (
 	"github.com/llimllib/spireweb/internal/embed"
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/session"
+	"github.com/llimllib/spireweb/internal/titles"
 )
 
 // Version is stamped in at build time by `mise run build`.
@@ -38,6 +39,8 @@ flags:
   --dev          reload templates and static files from disk per request
   --open         open a browser once the server is listening
   --no-watch     do not index in the background while serving
+  --no-titles    do not generate session titles with an LLM
+  --titles N     stop after generating N titles (0 for no limit)
 `
 
 func main() {
@@ -56,16 +59,21 @@ func main() {
 	dev := fs.Bool("dev", false, "reload templates and static files from disk")
 	openBrowser := fs.Bool("open", false, "open a browser once listening")
 	noWatch := fs.Bool("no-watch", false, "do not index in the background")
+	noTitles := fs.Bool("no-titles", false, "do not generate session titles")
+	// Titling the whole corpus costs real money. A limit makes a trial run
+	// possible -- newest sessions first, so it titles what is worth looking at
+	// -- before committing to all eleven hundred.
+	titleLimit := fs.Int("titles", 0, "stop after generating N titles")
 	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir()) }
 
 	var err error
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch)
+		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch, *noTitles)
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		err = runIndex(*dbPath, *dir, *full, *lexical)
+		err = runIndex(*dbPath, *dir, *full, *lexical, *noTitles, *titleLimit)
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
 		err = runStats(*dbPath)
@@ -148,7 +156,7 @@ func openIndex(path string, lexical bool) (*index.DB, index.Embedder, error) {
 	return db, e, nil
 }
 
-func runIndex(dbPath, dir string, full, lexical bool) error {
+func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) error {
 	db, embedder, err := openIndex(dbPath, lexical)
 	if err != nil {
 		return err
@@ -200,6 +208,64 @@ func runIndex(dbPath, dir string, full, lexical bool) error {
 	if embedder == nil {
 		note("built without embeddings; search will be keyword-only")
 	}
+
+	if noTitles {
+		return nil
+	}
+	return runTitles(ctx, db, titleLimit)
+}
+
+// summarizer builds the title generator from the environment.
+func summarizer() (titles.Summarizer, error) {
+	return titles.NewAnthropic()
+}
+
+// runTitles generates titles for sessions that do not have one.
+//
+// Separate from the build and after it, so a search index exists whatever
+// happens here. Missing configuration is a note rather than an error: titles
+// are an improvement to the list, and an index without them is the index this
+// tool had for its first five milestones.
+func runTitles(ctx context.Context, db *index.DB, limit int) error {
+	s, err := summarizer()
+	if err != nil {
+		note("skipping titles: %v", err)
+		return nil
+	}
+
+	start := time.Now()
+	var lastReport time.Time
+	p, err := titles.Run(ctx, db, titles.Options{
+		Summarizer: s,
+		Limit:      limit,
+		OnProgress: func(p titles.Progress) {
+			if p.Total == 0 {
+				return
+			}
+			if !p.Finished && time.Since(lastReport) < 100*time.Millisecond {
+				return
+			}
+			lastReport = time.Now()
+			fmt.Printf("\r\033[K%d/%d  titled %d  unchanged %d  failed %d",
+				p.Done, p.Total, p.Titled, p.Cached, p.Failed)
+		},
+	})
+	if p.Total > 0 {
+		fmt.Println()
+	}
+	if err != nil {
+		return err
+	}
+	if p.Titled > 0 {
+		fmt.Printf("titled %d sessions with %s in %s\n",
+			p.Titled, s.Name(), time.Since(start).Round(time.Millisecond))
+	}
+	if p.Failed > 0 {
+		// One reason, not p.Failed of them: when this goes wrong it is almost
+		// always one thing wrong with the configuration.
+		note("%d of %d sessions could not be summarized (%v); they keep their "+
+			"opening message and will be retried", p.Failed, p.Total, p.FirstErr)
+	}
 	return nil
 }
 
@@ -225,6 +291,9 @@ func runStats(dbPath string) error {
 		return err
 	}
 	fmt.Printf("sessions  %d\nchunks    %d\nprojects  %d\n", st.Sessions, st.Chunks, st.Projects)
+	if titled, err := db.CountTitledSessions(context.Background()); err == nil {
+		fmt.Printf("titles    %d\n", titled)
+	}
 	if st.Vectors < 0 {
 		fmt.Println("vectors   none (keyword search only)")
 	} else {

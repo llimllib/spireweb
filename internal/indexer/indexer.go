@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/llimllib/spireweb/internal/index"
+	"github.com/llimllib/spireweb/internal/titles"
 )
 
 // Phase is what the indexer is doing.
@@ -21,6 +22,12 @@ const (
 	// sessions written while the server was down.
 	PhaseStarting Phase = "starting"
 	PhaseIndexing Phase = "indexing"
+
+	// PhaseTitling covers the summarizing pass that follows a build. It is a
+	// phase of its own because it is slow, it runs against a network service,
+	// and "indexing" going quiet for a minute is not a useful thing to show.
+	PhaseTitling Phase = "titling"
+
 	PhaseWatching Phase = "watching"
 	PhaseStopped  Phase = "stopped"
 )
@@ -41,18 +48,24 @@ type Status struct {
 	Chunks  int
 	LastRun time.Time
 	LastErr string
+
+	// TitleErr is kept apart from LastErr: a summarizing failure means the
+	// list shows opening messages instead of titles, not that the index is
+	// broken, and conflating them would report a network problem as data loss.
+	TitleErr string
 }
 
 // Busy reports whether work is in progress, which is what decides how often
 // the UI polls.
 func (s Status) Busy() bool {
-	return s.Phase == PhaseStarting || s.Phase == PhaseIndexing
+	return s.Phase == PhaseStarting || s.Phase == PhaseIndexing || s.Phase == PhaseTitling
 }
 
 // Indexer runs a catch-up build and then watches for changes.
 type Indexer struct {
-	db   *index.DB
-	opts index.BuildOptions
+	db     *index.DB
+	opts   index.BuildOptions
+	titles titles.Options
 
 	mu     sync.Mutex
 	status Status
@@ -61,8 +74,11 @@ type Indexer struct {
 // New returns an Indexer over a writer handle. The caller keeps ownership of
 // db and must not write through it elsewhere: lembed's llama_context is not
 // safe for concurrent use, which is why the writer is a single connection.
-func New(db *index.DB, opts index.BuildOptions) *Indexer {
-	return &Indexer{db: db, opts: opts, status: Status{Phase: PhaseStarting}}
+//
+// A zero titles.Options -- no summarizer -- means titles are not generated,
+// which is the normal state of a machine with no API key.
+func New(db *index.DB, opts index.BuildOptions, t titles.Options) *Indexer {
+	return &Indexer{db: db, opts: opts, titles: t, status: Status{Phase: PhaseStarting}}
 }
 
 // Status returns the current snapshot.
@@ -105,6 +121,7 @@ func (i *Indexer) Run(ctx context.Context, watch bool) error {
 		return err
 	}
 	i.countSessions(ctx)
+	i.titlePass(ctx)
 	i.update(func(s *Status) {
 		s.Phase = PhaseWatching
 		s.LastRun = time.Now()
@@ -134,9 +151,53 @@ func (i *Indexer) Run(ctx context.Context, watch bool) error {
 			s.LastErr = ""
 		})
 		i.countSessions(ctx)
+
+		// After the build, never during: both write, and the writer is one
+		// connection. Titling a session pi is still adding to is cheap, since
+		// the key only moves when the conversation has grown substantially.
+		i.titlePass(ctx)
+		i.update(func(s *Status) {
+			s.Phase = PhaseWatching
+			s.Done, s.Total = 0, 0
+		})
 	})
 	i.update(func(s *Status) { s.Phase = PhaseStopped })
 	return err
+}
+
+// titlePass generates titles for sessions that need one.
+//
+// Failures are recorded and otherwise ignored. This depends on a network
+// service and an API key; a server whose header said "indexing failed" because
+// a summary request was rate limited would be reporting the wrong thing about
+// the wrong subsystem. The list falls back to the opening message either way.
+func (i *Indexer) titlePass(ctx context.Context) {
+	if i.titles.Summarizer == nil || ctx.Err() != nil {
+		return
+	}
+	// Announced before the first result rather than after it: progress only
+	// arrives once a session has been summarized, and the wait for that is
+	// exactly the part worth labelling.
+	i.update(func(s *Status) {
+		s.Phase = PhaseTitling
+		s.Done, s.Total = 0, 0
+	})
+
+	opts := i.titles
+	var last time.Time
+	opts.OnProgress = func(p titles.Progress) {
+		if !p.Finished && time.Since(last) < 200*time.Millisecond {
+			return
+		}
+		last = time.Now()
+		i.update(func(s *Status) {
+			s.Phase = PhaseTitling
+			s.Done, s.Total = p.Done, p.Total
+		})
+	}
+	if _, err := titles.Run(ctx, i.db, opts); err != nil && ctx.Err() == nil {
+		i.update(func(s *Status) { s.TitleErr = err.Error() })
+	}
 }
 
 // withProgress returns build options that publish progress, rate-limited.

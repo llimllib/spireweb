@@ -14,7 +14,10 @@ mise run index    # build the search index
 mise run dev      # http://localhost:8080
 ```
 
+Set `ANTHROPIC_API_KEY` to have sessions titled by an LLM as they are indexed.
+Without it, a session is listed under its opening message.
+
 ## Status
 
 Under construction; see the [milestones](https://github.com/llimllib/spireweb/milestones).
-Today `spireweb index`, `stats`, and `info` work. The server does not exist yet.
+Browsing, search, live indexing, and titles work.
