@@ -98,6 +98,15 @@ type Message struct {
 	// timestamp field is a string on some roles and a unix milliseconds number
 	// on others.
 	At time.Time `json:"-"`
+
+	// Raw is the message exactly as it appeared in the file, and is set only by
+	// ParseWithRaw. Archiving stores it verbatim rather than re-marshalling
+	// this struct, which would quietly drop every field this code does not know
+	// about -- and the corpus already contains roles it does not.
+	//
+	// Off by default because it is a second copy of the file in memory, and the
+	// server caches eight parsed sessions at a time.
+	Raw json.RawMessage `json:"-"`
 }
 
 // record is the envelope around every non-header line.
@@ -237,7 +246,15 @@ func (s *Session) Prose() []TextBlock {
 // Parse reads a session file. It returns an error only when the file cannot be
 // opened or has no usable header; malformed individual lines are counted in
 // SkippedLines.
-func Parse(path string) (*Session, error) {
+func Parse(path string) (*Session, error) { return parse(path, false) }
+
+// ParseWithRaw is Parse, keeping each message's original JSON for archiving.
+//
+// Separate entry point because the raw bytes double what a parsed session
+// costs in memory, and only the indexer needs them.
+func ParseWithRaw(path string) (*Session, error) { return parse(path, true) }
+
+func parse(path string, keepRaw bool) (*Session, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -287,6 +304,11 @@ func Parse(path string) (*Session, error) {
 			continue
 		}
 		m.At = r.Timestamp
+		if keepRaw {
+			// r.Message points into the scanner's buffer, which is reused for
+			// the next line.
+			m.Raw = append(json.RawMessage(nil), r.Message...)
+		}
 		s.Messages = append(s.Messages, m)
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, io.EOF) {

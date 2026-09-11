@@ -67,6 +67,28 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS sessions_started ON sessions(started_at);
 
+-- Every message of every session, stored as pi wrote it. This is the archive:
+-- the rest of the database is derived from it and can be rebuilt, while this
+-- table is the thing worth backing up and merging between machines.
+--
+-- content is the message object verbatim, as JSON text. Verbatim because an
+-- archive that keeps only the fields this code understands is not an archive:
+-- the corpus already contains a "bashExecution" role nothing here handles, and
+-- pi will add more. JSON text rather than a compressed blob because being
+-- queryable by any sqlite3 client is most of what portable means -- tool calls
+-- and their arguments live in here, and json_each over them is the point.
+--
+-- The key is (session_id, idx): a UUID pi minted and a position in an
+-- append-only file. Both survive a merge, which no autoincrement does.
+CREATE TABLE IF NOT EXISTS messages (
+  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  idx         INTEGER NOT NULL,
+  role        TEXT NOT NULL,
+  at          TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL,
+  PRIMARY KEY (session_id, idx)
+) WITHOUT ROWID;
+
 -- AUTOINCREMENT is required, not cosmetic. A plain INTEGER PRIMARY KEY reuses
 -- rowids freed by DELETE, and chunks_vec is keyed by chunk id. Incremental
 -- reindexing keeps unchanged chunks and inserts only new ones, so a recycled id

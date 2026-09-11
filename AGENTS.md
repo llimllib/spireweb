@@ -110,6 +110,41 @@ honest test of "is semantic search working" is opening a connection.
   this: 800 chars of prose is 162 tokens, 800 chars of dense JSON is 802.
 - `Chunk` splits only on rune boundaries. Invalid UTF-8 crashed the extension.
 
+## The archive
+
+`messages` holds every message of every session as pi wrote it, and is the one
+table that is not derived from something else: chunks, vectors, and titles can
+all be rebuilt from it, and it cannot be rebuilt from them. `spireweb doctor`
+checks it separately for that reason.
+
+`content` is JSON **text, verbatim and uncompressed**, and both halves are
+load-bearing. Verbatim because the corpus already contains a `bashExecution`
+role nothing in this repo handles, so re-marshalling `session.Message` would
+silently drop fields. Uncompressed because tool calls and their arguments live
+in there, and `json_each` over them is the point of having an archive at all;
+compressing `toolResult` would save ~150MB and cost that.
+
+The key is `(session_id, idx)` -- a UUID from pi and a position in an
+append-only file. Both survive a merge, which no autoincrement does.
+
+`session.ParseWithRaw` is what fills it. Plain `Parse` does not keep raw bytes,
+because they are a second copy of the file and the server caches eight parsed
+sessions at a time.
+
+It costs, measured on the corpus:
+
+| | before | after |
+| --- | --- | --- |
+| lexical index | ~30MB | **424MB** |
+| cold build | ~5s | ~9.5s |
+| one changed session | ~55ms | ~140ms |
+
+Writes are incremental the same way chunk reuse is: the stored count is the
+starting point, so a session that gained a message inserts one row. An index
+built before the table existed is backfilled by promoting the run to a full
+pass, exactly as `needsVectors` does, because mtime and size will never change
+again on an old session.
+
 After changing anything about indexing, both of these must return 0:
 
 ```sql

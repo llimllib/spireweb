@@ -38,6 +38,13 @@ type Progress struct {
 	// Backfill reports that the run was promoted to a full reindex in order to
 	// embed chunks that were indexed without vectors.
 	Backfill bool
+
+	// ArchiveBackfill reports the same promotion, to store messages for
+	// sessions indexed before the archive existed.
+	ArchiveBackfill bool
+
+	// Messages counts rows added to the archive this run.
+	Messages int
 }
 
 // BuildOptions configures a Build run.
@@ -102,6 +109,18 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		opts.Full = backfill
 	}
 
+	// Likewise for the archive: an index built before the messages table
+	// existed has sessions whose files will never look changed again.
+	archiveBackfill := false
+	if !opts.Full {
+		var err error
+		archiveBackfill, err = d.needsArchive()
+		if err != nil {
+			return Progress{Err: err}, err
+		}
+		opts.Full = archiveBackfill
+	}
+
 	files, err := session.Discover(opts.Dir)
 	if err != nil {
 		return Progress{Err: err}, fmt.Errorf("discover %s: %w", opts.Dir, err)
@@ -112,7 +131,7 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		return Progress{Err: err}, err
 	}
 
-	p := Progress{Total: len(files), Backfill: backfill}
+	p := Progress{Total: len(files), Backfill: backfill, ArchiveBackfill: archiveBackfill}
 	seen := make(map[string]bool, len(files))
 
 	for _, f := range files {
@@ -132,19 +151,22 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 			}
 		}
 
-		s, err := session.Parse(f.Path)
+		// WithRaw because indexing is what fills the archive, and the archive
+		// stores what pi wrote rather than what this code understood.
+		s, err := session.ParseWithRaw(f.Path)
 		if err != nil {
 			p.Failed++
 			report(p)
 			continue
 		}
 
-		n, err := d.upsertSession(ctx, s, opts)
+		n, msgs, err := d.upsertSession(ctx, s, opts)
 		if err != nil {
 			return p, fmt.Errorf("index %s: %w", f.Path, err)
 		}
 		p.Indexed++
 		p.Chunks += n
+		p.Messages += msgs
 		report(p)
 	}
 
@@ -205,14 +227,14 @@ func (d *DB) knownFiles() (map[string]fileState, error) {
 // rather than to what changed: measured at 2.1s for a 200-chunk session where
 // only 40 chunks were new, and growing linearly as the session grew. Reuse makes
 // the cost proportional to the new text, which is what makes watch mode viable.
-func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOptions) (int, error) {
+func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOptions) (chunks, msgs int, err error) {
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	chunks := s.Chunks(opts.ChunkChars)
+	blocks := s.Chunks(opts.ChunkChars)
 
 	// Enforce the model's token limit before anything reaches the embedder.
 	// Character-based chunking cannot predict token count: 800 chars of prose is
@@ -226,16 +248,16 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 	}); ok {
 		tc := tcf.TokenCounterFor(tx)
 		var safe []session.TextBlock
-		for _, c := range chunks {
+		for _, c := range blocks {
 			pieces, err := session.SplitToTokenLimit(tc, []string{c.Text}, session.MaxTokens)
 			if err != nil {
-				return 0, fmt.Errorf("token check: %w", err)
+				return 0, 0, fmt.Errorf("token check: %w", err)
 			}
 			for _, p := range pieces {
 				safe = append(safe, session.TextBlock{MsgIdx: c.MsgIdx, Role: c.Role, Text: p})
 			}
 		}
-		chunks = safe
+		blocks = safe
 	}
 
 	// Chunks already stored for this session, keyed by content and position.
@@ -244,12 +266,12 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 	// forever.
 	reusable, err := reusableChunks(tx, s.ID, opts.Embedder != nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	keep := make(map[int64]bool, len(chunks))
+	keep := make(map[int64]bool, len(blocks))
 	var toInsert []session.TextBlock
-	for _, c := range chunks {
+	for _, c := range blocks {
 		key := chunkKey{msgIdx: c.MsgIdx, role: c.Role, text: c.Text}
 		if id, ok := reusable[key]; ok && !keep[id] {
 			keep[id] = true
@@ -260,7 +282,7 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 
 	// Drop rows that are no longer part of the session (edited or removed text).
 	if err := deleteChunksExceptTx(tx, s.ID, keep); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// Upsert the session row rather than DELETE + INSERT.
@@ -275,7 +297,7 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 	// conflict is cleared first, and ON CONFLICT(id) updates in place.
 	if _, err := tx.Exec(
 		`DELETE FROM sessions WHERE path = ? AND id <> ?`, s.Path, s.ID); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	// title is deliberately absent from the UPDATE list: it is written by a
 	// separate pass and must survive a reindex, which happens every time the
@@ -293,24 +315,32 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 		s.StartedAt.UTC().Format(time.RFC3339),
 		s.ModTime.UnixNano(), s.Size, len(s.Messages), s.Preview(200), s.Reply(200),
 	); err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+
+	// After the session row, which the foreign key depends on, and inside the
+	// same transaction: a session whose chunks were written but whose messages
+	// were not would look archived and not be.
+	msgs, err = archiveMessages(ctx, tx, s)
+	if err != nil {
+		return 0, 0, fmt.Errorf("archive: %w", err)
 	}
 
 	if len(toInsert) == 0 {
-		return 0, tx.Commit()
+		return 0, msgs, tx.Commit()
 	}
 
 	insChunk, err := tx.PrepareContext(ctx,
 		`INSERT INTO chunks(session_id, msg_idx, role, body) VALUES(?,?,?,?)`)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer insChunk.Close()
 
 	insFTS, err := tx.PrepareContext(ctx,
 		`INSERT INTO chunks_fts(rowid, body) VALUES(?, ?)`)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer insFTS.Close()
 
@@ -318,26 +348,26 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 	for _, c := range toInsert {
 		res, err := insChunk.ExecContext(ctx, s.ID, c.MsgIdx, c.Role, c.Text)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		id, err := res.LastInsertId()
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		// External-content FTS5 requires explicit index maintenance.
 		if _, err := insFTS.ExecContext(ctx, id, c.Text); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		ids = append(ids, id)
 	}
 
 	if opts.Embedder != nil {
 		if err := opts.Embedder.EmbedInto(ctx, tx, ids); err != nil {
-			return 0, fmt.Errorf("embed: %w", err)
+			return 0, 0, fmt.Errorf("embed: %w", err)
 		}
 	}
 
-	return len(ids), tx.Commit()
+	return len(ids), msgs, tx.Commit()
 }
 
 // chunkKey identifies a chunk by content and position, so identical text in two

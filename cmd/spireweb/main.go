@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -168,7 +169,7 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) 
 
 	start := time.Now()
 	var lastReport time.Time
-	var announcedBackfill bool
+	var announcedBackfill, announcedArchive bool
 	p, err := index.Build(ctx, db, index.BuildOptions{
 		Dir:      dir,
 		Full:     full,
@@ -179,6 +180,11 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) 
 			if p.Backfill && !announcedBackfill {
 				announcedBackfill = true
 				note("index has chunks without embeddings; reindexing in full to add them")
+			}
+			if p.ArchiveBackfill && !announcedArchive {
+				announcedArchive = true
+				note("index predates the message archive; reindexing in full to store them " +
+					"(this corpus is ~265MB of messages, so expect the database to grow)")
 			}
 			if !p.Finished && time.Since(lastReport) < 100*time.Millisecond {
 				return
@@ -203,8 +209,8 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) 
 		return err
 	}
 
-	fmt.Printf("indexed %d sessions (%d chunks) in %s\n",
-		p.Indexed, p.Chunks, time.Since(start).Round(time.Millisecond))
+	fmt.Printf("indexed %d sessions (%d chunks, %d messages archived) in %s\n",
+		p.Indexed, p.Chunks, p.Messages, time.Since(start).Round(time.Millisecond))
 	if embedder == nil {
 		note("built without embeddings; search will be keyword-only")
 	}
@@ -291,6 +297,9 @@ func runStats(dbPath string) error {
 		return err
 	}
 	fmt.Printf("sessions  %d\nchunks    %d\nprojects  %d\n", st.Sessions, st.Chunks, st.Projects)
+	if msgs, err := db.CountMessages(context.Background()); err == nil {
+		fmt.Printf("messages  %d\n", msgs)
+	}
 	if titled, err := db.CountTitledSessions(context.Background()); err == nil {
 		fmt.Printf("titles    %d\n", titled)
 	}
@@ -314,14 +323,33 @@ func runStats(dbPath string) error {
 // to be checked directly -- and it cannot be checked with the sqlite3 CLI,
 // because chunks_vec is unreadable without the extension this binary links in.
 func runDoctor(dbPath string) error {
-	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err != nil {
-		return fmt.Errorf("doctor needs the extension to read chunks_vec: %w", err)
+	// The extension is needed to read chunks_vec at all, but an index built
+	// without embeddings has no such table and is still worth checking.
+	driver := index.DriverName
+	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err == nil {
+		driver = index.SemanticDriverName
+	} else {
+		note("extension unavailable, skipping vector checks: %v", err)
 	}
-	db, err := index.OpenReader(dbPath, index.SemanticDriverName)
+	db, err := index.OpenReader(dbPath, driver)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	// Which tables exist at all. A lexical-only index has no vector table, and
+	// an index that has not been rebuilt since the archive landed has no
+	// messages table -- OpenReader creates nothing, by design.
+	has := func(table string) bool {
+		var n int
+		_ = db.SQL().QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n)
+		return n > 0
+	}
+	hasVec, hasMessages := has("chunks_vec"), has("messages")
+	if !hasMessages {
+		note("no message archive in this index; run 'spireweb index' to build one")
+	}
 
 	checks := []struct{ name, sql string }{
 		{"vectors with no chunk", `SELECT COUNT(*) FROM chunks_vec v
@@ -332,10 +360,30 @@ func runDoctor(dbPath string) error {
 			WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = c.session_id)`},
 		{"fts rows minus chunks", `SELECT ABS((SELECT COUNT(*) FROM chunks_fts) -
 			(SELECT COUNT(*) FROM chunks))`},
+		// The archive is the part that is not derived from anything else, so a
+		// session missing from it is the one inconsistency that cannot be
+		// repaired by reindexing alone -- if the file is gone too, it is gone.
+		{"sessions not archived", `SELECT COUNT(*) FROM sessions s
+			WHERE s.n_msgs > 0
+			  AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)`},
+		{"messages minus n_msgs", `SELECT COUNT(*) FROM sessions s
+			WHERE s.n_msgs <> (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id)`},
+		{"messages with no session", `SELECT COUNT(*) FROM messages m
+			WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = m.session_id)`},
+		{"messages that are not json", `SELECT COUNT(*) FROM messages
+			WHERE json_valid(content) = 0`},
 	}
 
 	bad := 0
 	for _, c := range checks {
+		switch {
+		case !hasVec && strings.Contains(c.sql, "chunks_vec"):
+			fmt.Printf("%-26s %7s  skipped (no embeddings)\n", c.name, "-")
+			continue
+		case !hasMessages && strings.Contains(c.sql, "messages"):
+			fmt.Printf("%-26s %7s  skipped (no archive)\n", c.name, "-")
+			continue
+		}
 		var n int
 		if err := db.SQL().QueryRow(c.sql).Scan(&n); err != nil {
 			return fmt.Errorf("%s: %w", c.name, err)
@@ -345,7 +393,7 @@ func runDoctor(dbPath string) error {
 			status = "FAIL"
 			bad++
 		}
-		fmt.Printf("%-24s %7d  %s\n", c.name, n, status)
+		fmt.Printf("%-26s %7d  %s\n", c.name, n, status)
 	}
 	if bad > 0 {
 		return fmt.Errorf("%d checks failed; rebuild with 'spireweb index --full'", bad)

@@ -213,13 +213,15 @@ func (w *Watcher) reindex(ctx context.Context, paths []string) (int, error) {
 			continue
 		}
 
-		s, err := session.Parse(p)
+		// WithRaw so that live indexing archives too; a session written while
+		// the server runs must not be the one session missing from the archive.
+		s, err := session.ParseWithRaw(p)
 		if err != nil {
 			// A session may be mid-write, or not yet have a header. Skipping is
 			// correct: the next event will pick it up.
 			continue
 		}
-		n, err := w.db.upsertSession(ctx, s, w.opts)
+		n, _, err := w.db.upsertSession(ctx, s, w.opts)
 		if err != nil {
 			return chunks, err
 		}
