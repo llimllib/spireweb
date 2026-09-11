@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 // Lexical ranks chunks by FTS5 BM25.
@@ -66,33 +65,6 @@ func (l *Lexical) Rank(ctx context.Context, q Query, limit int) ([]ChunkID, erro
 		out = append(out, id)
 	}
 	return out, rows.Err()
-}
-
-// ftsQuery converts free text into an FTS5 MATCH expression.
-//
-// User input cannot be passed through: FTS5 has its own syntax, and characters
-// common in developer queries (-, *, ", :, () ) are operators there. An
-// unbalanced quote or a leading hyphen is a syntax error, which would surface as
-// a failed search while typing. Each word is therefore extracted and quoted as
-// a literal, and the terms are OR-ed so partial matches still rank.
-//
-// OR rather than AND because fusion handles precision: a chunk matching more
-// terms scores better under BM25 and rises anyway, while AND would return
-// nothing for a query where one word is absent.
-func ftsQuery(text string) string {
-	var terms []string
-	for _, w := range strings.FieldsFunc(text, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
-	}) {
-		if len(w) < 2 {
-			continue // single characters match too much to be useful
-		}
-		terms = append(terms, `"`+w+`"`)
-	}
-	if len(terms) == 0 {
-		return ""
-	}
-	return strings.Join(terms, " OR ")
 }
 
 // Excerpt returns a snippet of a chunk with matching terms wrapped in open

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -588,5 +589,93 @@ func TestAllMatchingMessagesAreMarked(t *testing.T) {
 	// BM25 puts the message that is mostly the term ahead of the aside.
 	if target, _ := doc.Find(".reading").Attr("data-scroll-to"); target != "m2" {
 		t.Errorf("data-scroll-to = %q, want m2, the strongest match", target)
+	}
+}
+
+// Quoting is a constraint, not a preference: a session that lacks the phrase
+// must not appear at all, whatever any ranker thinks of it.
+func TestQuotedPhraseFiltersTheList(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("the deploy pipeline broke this morning")},
+		"bbb": {userMsg("the pipeline deploy broke this morning")},
+		"ccc": {userMsg("we deploy the whole pipeline every morning")},
+	})
+
+	_, doc := f.get(t, "/?q="+url.QueryEscape(`"deploy pipeline"`))
+	rows := doc.Find("a.row")
+	if rows.Length() != 1 {
+		t.Fatalf("rows = %d, want only the exact match", rows.Length())
+	}
+	if href, _ := rows.Attr("href"); !strings.Contains(href, "aaa") {
+		t.Errorf("row = %q, want session aaa", href)
+	}
+
+	// The same words unquoted are a suggestion, and the near misses return.
+	_, doc = f.get(t, "/?q="+url.QueryEscape("deploy pipeline"))
+	if n := doc.Find("a.row").Length(); n != 3 {
+		t.Errorf("unquoted rows = %d, want all three", n)
+	}
+}
+
+// Excluding results is only safe if the reader can tell that is what happened.
+func TestEmptyPhraseSearchExplainsItself(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("the deploy pipeline broke this morning")},
+	})
+
+	_, doc := f.get(t, "/?q="+url.QueryEscape(`"pipeline deploy"`))
+	if n := doc.Find("a.row").Length(); n != 0 {
+		t.Fatalf("rows = %d, want none", n)
+	}
+	note := doc.Find(".list .empty").Text()
+	if !strings.Contains(note, "pipeline deploy") {
+		t.Errorf("empty note = %q, want it to name the phrase", note)
+	}
+	if !strings.Contains(note, "Remove the quotes") {
+		t.Errorf("empty note = %q, want a way out", note)
+	}
+
+	// An ordinary search that finds nothing says the ordinary thing.
+	_, doc = f.get(t, "/?q=xylophone")
+	if note := doc.Find(".list .empty").Text(); !strings.Contains(note, "No sessions match") {
+		t.Errorf("empty note = %q", note)
+	}
+}
+
+// A mixed query: the phrase decides who is listed, the bare word the order.
+func TestBareWordsOrderPhraseMatches(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("the deploy pipeline broke and nothing else happened")},
+		"bbb": {userMsg("the deploy pipeline broke because of a timeout in the runner")},
+		"ccc": {userMsg("a timeout in the runner, no pipeline involved at all")},
+	})
+
+	_, doc := f.get(t, "/?q="+url.QueryEscape(`"deploy pipeline" timeout`))
+	rows := doc.Find("a.row")
+	if rows.Length() != 2 {
+		t.Fatalf("rows = %d, want the two phrase matches", rows.Length())
+	}
+	if href, _ := rows.First().Attr("href"); !strings.Contains(href, "bbb") {
+		t.Errorf("first row = %q, want bbb, which also mentions the timeout", href)
+	}
+}
+
+// In-session marking follows the same rule: with a phrase, only true matches
+// are tinted, not every message holding one of the unquoted words.
+func TestQuotedSearchTintsOnlyPhraseMatches(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {
+			userMsg("a timeout, mentioned on its own"),
+			assistantMsg("the deploy pipeline broke because of a timeout"),
+		},
+	})
+
+	_, doc := f.get(t, "/sessions/aaa?q="+url.QueryEscape(`"deploy pipeline" timeout`))
+	matches := doc.Find(".turn.is-match")
+	if matches.Length() != 1 {
+		t.Fatalf("tinted turns = %d, want only the phrase match", matches.Length())
+	}
+	if id, _ := matches.Attr("id"); id != "m1" {
+		t.Errorf("tinted turn = %q, want m1", id)
 	}
 }

@@ -29,7 +29,13 @@ func MessagesMatching(ctx context.Context, db *sql.DB, sessionID, queryText stri
 	if db == nil || sessionID == "" {
 		return nil, nil
 	}
-	match := ftsQuery(queryText)
+	// A quoted query tints only true phrase matches. Highlighting every
+	// message that happened to contain one of the unquoted words would put
+	// marks on messages the search deliberately excluded sessions for lacking.
+	match := strictQuery(queryText)
+	if match == "" {
+		match = ftsQuery(queryText)
+	}
 	if match == "" {
 		return nil, nil
 	}

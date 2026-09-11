@@ -164,6 +164,43 @@ re-embedded 46k chunks to gain two nullable columns.
 `--titles N` caps a run. The corpus is on the order of a dollar all at once, so
 a trial run over the newest few is worth having.
 
+## Query syntax
+
+Double quotes mean a phrase, and a phrase **excludes**: a session without it
+does not appear, however any ranker scores it. Demotion was the alternative and
+is worse in the case that matters -- if a phrase only sorted matches upward,
+a page of plausible results would look the same whether or not the corpus
+contained the phrase, so "did I ever discuss exactly this?" would have no
+observable answer. Empty is the answer, which is why `emptyNote` names the
+phrase and says to drop the quotes.
+
+Unquoted words stay ranking hints. One FTS5 expression does both:
+
+    P AND (P OR w1 OR w2)
+
+The AND-ed part constrains; the OR-ed group exists only so the bare words reach
+BM25, which scores every phrase in the expression it is handed. Drop the second
+group and a mixed query ranks as though the unquoted words were never typed.
+
+**The lexical ranker is not enough on its own.** The semantic ranker has no
+notion of a phrase -- it embeds the text and returns neighbours -- so it will
+happily contribute sessions containing none of the words. `sessionsMatching`
+filters the fused results, and without it quoting visibly fails to do the one
+thing it promises. There is a test with a deliberately ignorant ranker for
+exactly this.
+
+Three things that are true and worth not rediscovering:
+
+- Exact means exact **modulo stemming**: the tokenizer is `porter`, so
+  `"deploying pipelines"` matches "deploy pipeline". Byte-exact needs a second
+  unstemmed index over 46k chunks.
+- A phrase spanning a chunk boundary is invisible, chunks being 800 characters.
+- Single-character tokens are dropped from bare words and **kept inside
+  phrases**. `"is a weird choice to"` matches nothing if the `a` is dropped.
+- An unterminated quote is a phrase in progress, not an error. Search runs on
+  every keystroke, so `"deploy pip` is a state the parser has to hold an
+  opinion about.
+
 ## Rendering
 
 Transcripts are parsed from the `.jsonl` on demand, not stored. The DB is a

@@ -18,7 +18,7 @@
   </li>
   {{- else }}
   <li class="empty">
-    {{- if $.Searching}}No sessions match that search.{{else}}Nothing indexed yet.{{end -}}
+    {{- if $.Searching}}{{$.EmptyNote}}{{else}}Nothing indexed yet.{{end -}}
   </li>
   {{- end }}
 </ol>

@@ -35,6 +35,12 @@ type pageData struct {
 	// Searching distinguishes "no sessions indexed" from "no matches".
 	Searching bool
 
+	// EmptyNote explains an empty result list, which a quoted query makes
+	// worth distinguishing: a phrase excludes rather than demotes, so "no
+	// results" can mean the corpus does not contain those words in that order
+	// rather than that the search was bad.
+	EmptyNote string
+
 	// SearchEnabled is false when no ranker could be built, which disables
 	// the input rather than offering a box that silently does nothing.
 	SearchEnabled bool
@@ -76,13 +82,35 @@ func (s *Server) newPage(r *http.Request) (pageData, error) {
 	// it should not cost the page.
 	count, _ := s.db.CountSessions(r.Context())
 
-	return pageData{
+	data := pageData{
 		Sessions:      rows,
 		Query:         q,
 		Searching:     strings.TrimSpace(q) != "",
 		SearchEnabled: s.engine != nil,
 		SessionCount:  count,
-	}, nil
+	}
+	if data.Searching && len(rows) == 0 {
+		data.EmptyNote = emptyNote(q)
+	}
+	return data, nil
+}
+
+// emptyNote says why a search returned nothing.
+func emptyNote(query string) string {
+	phrases := search.Phrases(query)
+	if len(phrases) == 0 {
+		return "No sessions match that search."
+	}
+	quoted := make([]string, len(phrases))
+	for i, p := range phrases {
+		quoted[i] = "\u201c" + p + "\u201d"
+	}
+	noun := "that exact phrase"
+	if len(quoted) > 1 {
+		noun = "those exact phrases"
+	}
+	return "No sessions contain " + noun + ": " + strings.Join(quoted, ", ") +
+		". Remove the quotes to search for the words separately."
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +126,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	case len(data.Sessions) > 0:
 		s.loadTranscript(r, &data, data.Sessions[0].Summary)
 	case data.Searching:
-		data.Notice = "No sessions match that search."
+		data.Notice = data.EmptyNote
 	default:
 		data.EmptyIndex = true
 	}

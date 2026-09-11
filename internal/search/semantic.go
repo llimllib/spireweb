@@ -33,7 +33,9 @@ func (s *Semantic) Rank(ctx context.Context, q Query, limit int) ([]ChunkID, err
 	if strings.TrimSpace(q.Text) == "" {
 		return nil, nil
 	}
-	vec, err := s.Embedder.EmbedText(ctx, q.Text)
+	// Quotes are syntax for the lexical side and noise here: the phrase still
+	// belongs in the embedded text, the quote characters do not.
+	vec, err := s.Embedder.EmbedText(ctx, strings.ReplaceAll(q.Text, `"`, " "))
 	if err != nil {
 		return nil, err
 	}

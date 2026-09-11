@@ -19,7 +19,9 @@
   {{- /* Submitting normally still works without JavaScript: the action is a
          real page. HTMX only intercepts to swap the rows as you type. */ -}}
   <form class="search" role="search" action="/search" method="get">
-    <input type="search" name="q" placeholder="Search sessions" value="{{.Query}}"
+    {{- /* The placeholder is the only place quoting is discoverable from,
+           short of reading the help sheet. */ -}}
+    <input type="search" name="q" placeholder="Search sessions, &quot;exact phrase&quot;" value="{{.Query}}"
            autocomplete="off" spellcheck="false"
            {{- if .SearchEnabled }}
            hx-get="/search"
@@ -56,6 +58,11 @@
 {{- /* Native <dialog>: modal behaviour, focus trapping, and Escape all come
        from the platform. Press ? to open. */ -}}
 <dialog id="help">
+  <h2>Search</h2>
+  <dl class="keys">
+    <dt><kbd>"…"</kbd></dt><dd>match a phrase exactly; sessions without it are excluded</dd>
+  </dl>
+
   <h2>Keyboard</h2>
   <dl class="keys">
     <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>move down / up the list</dd>

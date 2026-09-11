@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -42,6 +43,16 @@ func (e *Engine) SearchSessions(ctx context.Context, db *sql.DB, q Query, limit 
 		return nil, nil
 	}
 
+	// A quoted phrase is a constraint, and the lexical ranker is not the only
+	// source of candidates: the semantic ranker has no notion of a phrase and
+	// will happily return neighbours of the query that contain none of its
+	// words. Without this filter, quoting would visibly fail to do the one
+	// thing it promises.
+	qualified, err := sessionsMatching(ctx, db, strictQuery(q.Text))
+	if err != nil {
+		return nil, err
+	}
+
 	byChunk := make(map[ChunkID]Scored, len(hits))
 	args := make([]any, 0, len(hits))
 	for _, h := range hits {
@@ -67,6 +78,10 @@ func (e *Engine) SearchSessions(ctx context.Context, db *sql.DB, q Query, limit 
 		summary, err := scanWithPrefix(rows, &chunkID, &body)
 		if err != nil {
 			return nil, err
+		}
+
+		if qualified != nil && !qualified[summary.ID] {
+			continue
 		}
 
 		cur, ok := bySession[summary.ID]
@@ -103,6 +118,37 @@ func (e *Engine) SearchSessions(ctx context.Context, db *sql.DB, q Query, limit 
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// sessionsMatching returns the sessions satisfying a strict FTS5 expression,
+// or nil when there is no constraint to apply.
+//
+// A session qualifies when any one of its chunks matches, because the session
+// is what the list shows. The alternative -- requiring one chunk to hold every
+// phrase -- would make a two-phrase query depend on how an 800-character
+// chunking happened to fall.
+func sessionsMatching(ctx context.Context, db *sql.DB, strict string) (map[string]bool, error) {
+	if strict == "" {
+		return nil, nil // nil means "no constraint", which is not the same as none matching
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT DISTINCT c.session_id
+		FROM chunks_fts f JOIN chunks c ON c.id = f.rowid
+		WHERE chunks_fts MATCH ?`, strict)
+	if err != nil {
+		return nil, fmt.Errorf("phrase filter: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 // prefixScanner adapts a row so index.ScanSummary can read the trailing

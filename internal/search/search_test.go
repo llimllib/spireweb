@@ -241,7 +241,10 @@ func TestFTSQuery(t *testing.T) {
 		{"NLContextualEmbedding", `"NLContextualEmbedding"`},
 		{"snake_case_name", `"snake_case_name"`},
 		{"--pooling mean", `"pooling" OR "mean"`},
-		{`unbalanced " quote`, `"unbalanced" OR "quote"`},
+		// An opening quote starts a phrase, and the search box runs on every
+		// keystroke, so this is what a half-typed phrase looks like rather
+		// than a malformed query.
+		{`unbalanced " quote`, `"quote" AND ("quote" OR "unbalanced")`},
 		{"a* OR b*", `"OR"`}, // operators stripped, short terms dropped
 		{"c++ / go", `"go"`},
 		{"error: NOT found", `"error" OR "NOT" OR "found"`},
