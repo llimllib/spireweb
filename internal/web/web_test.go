@@ -470,3 +470,40 @@ func TestEditToolRendersADiff(t *testing.T) {
 		t.Error("raw edit arguments leaked into the fragment")
 	}
 }
+
+// Every message gets a unique anchor, which is what a search hit's msg_idx
+// resolves against.
+func TestTranscriptAnchorsAreUnique(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {
+			userMsg("what changed"),
+			toolCallMsg("tc1", "bash", `{"command":"git log"}`),
+			toolResultMsg("tc1", "abc123"),
+			assistantMsg("two commits"),
+		},
+	})
+	_, doc := f.get(t, "/sessions/aaa")
+
+	seen := map[string]int{}
+	doc.Find(".reading [id]").Each(func(_ int, sel *goquery.Selection) {
+		id, _ := sel.Attr("id")
+		if strings.HasPrefix(id, "m") {
+			seen[id]++
+		}
+	})
+	if len(seen) == 0 {
+		t.Fatal("no message anchors in the transcript")
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("anchor %s appears %d times; ids must be unique", id, n)
+		}
+	}
+	// The user turn is message 0 and the tool call is message 1.
+	if doc.Find("#m0.turn-user").Length() != 1 {
+		t.Error("no #m0 on the opening user turn")
+	}
+	if doc.Find("details.tool#m1").Length() != 1 {
+		t.Error("no #m1 on the tool call")
+	}
+}

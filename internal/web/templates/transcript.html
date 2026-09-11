@@ -28,12 +28,12 @@
 <p class="notice">{{.}}</p>
 {{- end }}
 
-{{- range .Transcript }}
+{{- range $e := .Transcript }}
 {{- if eq .Kind "tool" }}
   {{- with .Tool }}
   {{- /* Loading on toggle rather than up front: tool traffic is around 98%
          of a session's bytes, and a single call can carry a whole file. */ -}}
-  <details class="tool{{if .IsError}} is-error{{end}}">
+  <details class="tool{{if .IsError}} is-error{{end}}"{{if $e.Anchor}} id="m{{$e.MsgIdx}}"{{end}}>
     <summary>
       <span class="tool-name">{{.Name}}</span>
       <span class="tool-summary">{{.Summary}}</span>
@@ -48,7 +48,10 @@
   </details>
   {{- end }}
 {{- else }}
-  <section class="turn turn-{{.Kind}}">
+  {{- /* Anchored by message index, which is what chunks.msg_idx points at,
+         so a search hit can be located in the page. Only the first entry of
+         a message carries the id; ids must be unique. */ -}}
+  <section class="turn turn-{{.Kind}}"{{if .Anchor}} id="m{{.MsgIdx}}"{{end}}>
     <div class="turn-role">{{.Kind}}</div>
     <div class="prose">{{.HTML}}</div>
   </section>

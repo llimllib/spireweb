@@ -380,3 +380,49 @@ func quoteJSON(s string) string {
 	}
 	return string(b)
 }
+
+// A chunk records the message it came from, so a message has to be
+// addressable in the page. One message can render as several entries -- prose,
+// a tool call, more prose -- and only the first of them may carry the id.
+func TestTranscriptAnchorsEachMessageOnce(t *testing.T) {
+	s := writeFixture(t,
+		`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"what changed"}]}}`,
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"Looking."},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"command":"git log"}},{"type":"text","text":"Two commits."}]}}`,
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","content":[{"type":"text","text":"abc123"}]}}`,
+	)
+
+	entries := Transcript(s)
+	if len(entries) != 4 {
+		t.Fatalf("got %d entries, want 4", len(entries))
+	}
+
+	// Message 0 is the user turn; the other three entries all come from
+	// message 1.
+	wantIdx := []int{0, 1, 1, 1}
+	wantAnchor := []bool{true, true, false, false}
+	for i, e := range entries {
+		if e.MsgIdx != wantIdx[i] {
+			t.Errorf("entry %d MsgIdx = %d, want %d", i, e.MsgIdx, wantIdx[i])
+		}
+		if e.Anchor != wantAnchor[i] {
+			t.Errorf("entry %d Anchor = %v, want %v", i, e.Anchor, wantAnchor[i])
+		}
+	}
+}
+
+// A message whose blocks are all empty renders nothing, so the anchor has to
+// land on whatever the next message produces rather than being skipped.
+func TestTranscriptAnchorsSurviveEmptyMessages(t *testing.T) {
+	s := writeFixture(t,
+		`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"   "}]}}`,
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"real"}]}}`,
+	)
+	entries := Transcript(s)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if !entries[0].Anchor || entries[0].MsgIdx != 1 {
+		t.Errorf("entry = {MsgIdx:%d Anchor:%v}, want message 1 anchored",
+			entries[0].MsgIdx, entries[0].Anchor)
+	}
+}

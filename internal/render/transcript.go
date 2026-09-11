@@ -26,6 +26,19 @@ type Entry struct {
 	Kind string
 	At   time.Time
 
+	// MsgIdx is the index of the message this came from, which is what
+	// chunks.msg_idx points at. Several entries can share one: an assistant
+	// message is often prose, then a tool call, then more prose. So it
+	// addresses a message, not an entry, which is the granularity a search hit
+	// has anyway.
+	MsgIdx int
+
+	// Anchor marks the first entry of each message, and so the one that
+	// carries the id. An id has to be unique in a document, and several
+	// entries share a MsgIdx; scrolling to the first of them is what "go to
+	// message 12" means anyway.
+	Anchor bool
+
 	// HTML is set for prose entries.
 	HTML template.HTML
 
@@ -53,6 +66,18 @@ func Transcript(s *session.Session) []Entry {
 	results := s.ToolResults()
 
 	var out []Entry
+	// anchor claims the id for the first entry a message produces. Which entry
+	// that is cannot be known before rendering it: a message whose every block
+	// is empty produces none at all.
+	anchored := -1
+	anchor := func(e Entry) Entry {
+		if anchored != e.MsgIdx {
+			anchored = e.MsgIdx
+			e.Anchor = true
+		}
+		return e
+	}
+
 	for i, m := range s.Messages {
 		switch m.Role {
 		case session.RoleUser, session.RoleAssistant:
@@ -68,7 +93,8 @@ func Transcript(s *session.Session) []Entry {
 				if strings.TrimSpace(blk.Text) == "" {
 					continue
 				}
-				out = append(out, Entry{Kind: m.Role, At: m.At, HTML: Markdown(blk.Text)})
+				out = append(out, anchor(Entry{
+					Kind: m.Role, At: m.At, MsgIdx: i, HTML: Markdown(blk.Text)}))
 
 			case session.BlockThinking:
 				// Usually empty: the model returns a signature without the
@@ -76,7 +102,8 @@ func Transcript(s *session.Session) []Entry {
 				if strings.TrimSpace(blk.Thinking) == "" {
 					continue
 				}
-				out = append(out, Entry{Kind: KindThinking, At: m.At, HTML: Markdown(blk.Thinking)})
+				out = append(out, anchor(Entry{
+					Kind: KindThinking, At: m.At, MsgIdx: i, HTML: Markdown(blk.Thinking)}))
 
 			case session.BlockToolCall:
 				res, ok := results[blk.ID]
@@ -90,7 +117,7 @@ func Transcript(s *session.Session) []Entry {
 				if ok {
 					t.IsError = res.IsError
 				}
-				out = append(out, Entry{Kind: KindTool, At: m.At, Tool: t})
+				out = append(out, anchor(Entry{Kind: KindTool, At: m.At, MsgIdx: i, Tool: t}))
 			}
 		}
 	}
