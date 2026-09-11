@@ -10,5 +10,9 @@
 *.db-wal
 *.db-shm
 
+# Playwright output. Browsers live in a shared cache outside the repo.
+/test-results/
+/playwright-report/
+
 # Staged from go-sqlite3 by `mise run sqlite-header`, derived from go.mod.
 /third_party/

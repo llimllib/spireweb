@@ -1,0 +1,22 @@
+{
+  "//": "Separate from the root config, which compiles internal/web/ts into",
+  "//2": "static/app.js. These files are never emitted -- Playwright strips the",
+  "//3": "types itself -- but they are worth typechecking, and they need node",
+  "//4": "and @playwright/test in scope, which browser code must not have.",
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}

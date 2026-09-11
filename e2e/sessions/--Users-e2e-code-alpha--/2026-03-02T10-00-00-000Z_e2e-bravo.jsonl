@@ -1,0 +1,5 @@
+{"type": "session", "version": 3, "id": "e2e-bravo", "timestamp": "2026-03-02T10:00:00.000Z", "cwd": "/Users/e2e/code/alpha"}
+{"type": "message", "timestamp": "2026-03-01T10:00:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "why did the deploy fail"}]}}
+{"type": "message", "timestamp": "2026-03-01T10:00:01.000Z", "message": {"role": "assistant", "content": [{"type": "toolCall", "id": "tc-e2e-1", "name": "bash", "arguments": {"command": "git log --oneline -1"}}]}}
+{"type": "message", "timestamp": "2026-03-01T10:00:02.000Z", "message": {"role": "toolResult", "toolCallId": "tc-e2e-1", "toolName": "bash", "isError": false, "content": [{"type": "text", "text": "9f3c21d tighten the retry budget"}]}}
+{"type": "message", "timestamp": "2026-03-01T10:00:00.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "The retry budget change is the culprit."}]}}

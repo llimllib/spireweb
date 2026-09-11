@@ -61,7 +61,15 @@ run = "gofmt -l -w ."
 [tasks.lint]
 description = "Vet, lint, and typecheck"
 depends = ["sqlite-header"]
-run = ["go vet ./...", "golangci-lint run", "pnpm exec oxlint internal/web/ts", "pnpm exec tsc --noEmit"]
+run = [
+  "go vet ./...",
+  "golangci-lint run",
+  "pnpm exec oxlint internal/web/ts e2e",
+  "pnpm exec tsc --noEmit",
+  # The e2e sources are not part of the browser build and have their own
+  # config: node and @playwright/test in scope, nothing emitted.
+  "pnpm exec tsc -p e2e",
+]
 
 [tasks.gofmt-check]
 description = "Fail if any Go source is unformatted"
@@ -88,5 +96,21 @@ run = "pnpm exec tsc --watch --preserveWatchOutput"
 description = "Run the server and the TypeScript compiler in watch mode"
 depends = ["dev:go", "dev:ts"]
 
+[tasks.e2e]
+description = "Browser smoke tests (run e2e-install once first)"
+# Playwright starts the server itself (see e2e/serve.sh), which is what knows
+# how to build a throwaway index over the committed fixtures.
+#
+# Deliberately not part of `check`: it is an order of magnitude slower than
+# everything else and needs a browser that is not a repository dependency.
+run = "pnpm exec playwright test"
+
+[tasks.e2e-install]
+description = "Download the browser the e2e tests drive"
+# Playwright's browsers live in a shared cache outside the repo, and the
+# version is tied to the @playwright/test release. Bumping that package means
+# running this again; Playwright says so itself when the build is missing.
+run = "pnpm exec playwright install chromium"
+
 [tasks.clean]
-run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map"
+run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map && rm -rf test-results playwright-report"

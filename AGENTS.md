@@ -192,8 +192,9 @@ rather than `:focus-visible` does the styling, because a programmatic
 `focus()` does not always count as keyboard-initiated.
 
 `app.ts` reaches the page through selectors, which nothing type-checks.
-`markup_test.go` pins that contract. It cannot tell whether `j` works: the
-bindings were confirmed by hand, and no browser test exists yet.
+`markup_test.go` pins that contract; it cannot tell whether `j` *works*, which
+is what `e2e/smoke.spec.ts` is for. Both are worth having: the Go test says
+which selector broke, in the suite that runs on every commit.
 
 ## Tests
 
@@ -203,6 +204,30 @@ semantic test loads the model. The other five packages total under 2s.
 
 Semantic tests skip when the backend cannot actually run, not when its files
 are missing -- see the GPU note above.
+
+## Browser tests
+
+`mise run e2e` drives Chromium through Playwright. Not part of `mise run
+check`: it is ~7s against check's ~20s but needs a browser that is not a
+repository dependency, and a failure there is a different kind of signal.
+
+`mise run e2e-install` fetches that browser, once. The `@playwright/test`
+version is pinned to `~1.58`, whose browser revision is **chromium-1208**,
+because that build was already in the shared cache -- a minor bump is a 130MB
+download, so it is worth knowing that is what changed. Playwright says what to
+run when the build is missing.
+
+Playwright starts the server itself, through `e2e/serve.sh`, which compiles
+`app.js` (embedded, generated, so a stale one means testing the previous
+keyboard handling), builds the binary, and indexes `e2e/sessions` into a temp
+database. The fixtures are committed for a reason: the tests assert which
+session is newest and how many rows a filter leaves, and neither survives
+contact with a real corpus. `e2e-charlie` is 41 messages with one occurrence of
+"quicksand" at the end, so the scroll-to-match test starts below the fold.
+
+These tests are only worth their weight if they fail when the behaviour breaks,
+which is worth re-checking after editing them: disabling `scrollToMatch()` and
+renaming the `j` case both produce failures.
 
 ## Changing GitHub Actions
 

@@ -61,3 +61,33 @@ jobs:
       # neither of which any test would catch.
       - name: Smoke test
         run: ./spireweb info
+
+      # Playwright's browsers are a download into a shared cache, not a
+      # repository dependency, so they have to be asked for explicitly. Keyed
+      # on the lockfile because the browser build is pinned to the
+      # @playwright/test version.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # The only tests that drive a browser, and so the only ones that can
+      # tell whether j moves the cursor or a match scrolls into view. Kept out
+      # of `mise run check` because they are an order of magnitude slower than
+      # the rest of the suite.
+      - name: Browser tests
+        run: mise run e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
