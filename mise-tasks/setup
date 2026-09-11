@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Install the embedding model and sqlite-lembed (~30s, first run only)"
+#MISE description="Install the embedding model and sqlite-lembed (~1 min, first run only)"
 #
 # Semantic search needs two things that are too large to vendor: the
 # all-MiniLM-L6-v2 GGUF model, and the sqlite-lembed extension.
@@ -37,7 +37,7 @@ if [ ! -f "$MODEL" ]; then
 fi
 
 if [ ! -f "$EXT" ]; then
-  echo "==> building sqlite-lembed from the landrix fork (~15s)"
+  echo "==> building sqlite-lembed from the landrix fork (~45s)"
   mkdir -p "$DATA_DIR/src"
   [ -d "$SRC" ] || git clone --depth 1 "$LEMBED_REPO" "$SRC"
   (
@@ -53,6 +53,16 @@ if [ ! -f "$EXT" ]; then
     cmake --build build -j8
   )
   cp "$SRC/build/bin/$EXT_FILE" "$EXT"
+
+  # The build tree is 473MB -- 345MB of it the llama.cpp submodule's git
+  # objects, which --depth 1 does not shrink much -- to produce a 3.2MB dylib.
+  # Rebuilding from nothing takes about a minute and bumping the fork happens
+  # approximately never, so keeping half a gigabyte around forever is the
+  # wrong trade. Set SPIREWEB_KEEP_SRC=1 when working on the extension itself.
+  if [ -z "${SPIREWEB_KEEP_SRC:-}" ]; then
+    echo "==> removing the build tree (SPIREWEB_KEEP_SRC=1 to keep it)"
+    rm -rf "$DATA_DIR/src"
+  fi
 fi
 
 # Fail loudly if the installed extension is the crashing upstream build rather

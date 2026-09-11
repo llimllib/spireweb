@@ -5,7 +5,7 @@ Non-obvious things about this repository. Everything here cost somebody an hour.
 ## Build
 
 ```bash
-mise run setup    # once: embedding model + sqlite-lembed (~30s)
+mise run setup    # once: embedding model + sqlite-lembed (~1 min)
 mise run check    # vet, lint, typecheck, gofmt, test -- run before committing
 mise run dev      # server + tsc, both watching
 ```
@@ -22,6 +22,12 @@ attestation check. Its version is pinned equal to `package.json`'s
 `internal/web/static`, and `app.js` is generated, not committed.
 
 CI is Linux and has no GPU, so the semantic tests skip -- see below.
+
+`setup` deletes its build tree when it finishes. Building the fork leaves
+473MB behind -- 345MB of it the llama.cpp submodule's git objects, which
+`--depth 1` barely dents -- to produce a 3.2MB dylib, and a rebuild from
+nothing is a minute. `SPIREWEB_KEEP_SRC=1` keeps it for working on the
+extension itself.
 
 ## sqlite3.h
 
