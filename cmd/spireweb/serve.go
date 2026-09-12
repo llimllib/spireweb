@@ -114,6 +114,15 @@ func startIndexer(ctx context.Context, dbPath, driver, dir string, noWatch, noTi
 		return nil, nil
 	}
 
+	// Said before the build rather than after, because the catch-up starts
+	// immediately and nothing else reports the cost. On this corpus it is the
+	// difference between a 107MB index and a 502MB one, arriving in about
+	// fifteen seconds of starting the server.
+	if need, err := writer.NeedsArchive(); err == nil && need {
+		note("this index predates the message archive; the catch-up build will store " +
+			"every message, which grows the database several times over")
+	}
+
 	opts := index.BuildOptions{Dir: dir}
 	if driver == index.SemanticDriverName {
 		if e, err := embed.New(writer.SQL(), embed.DefaultPaths()); err != nil {

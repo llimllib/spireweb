@@ -68,6 +68,15 @@ func archiveMessages(ctx context.Context, tx *sql.Tx, s *session.Session) (int, 
 	return n, nil
 }
 
+// NeedsArchive reports whether the next build will backfill the archive, so a
+// caller can say so before it happens.
+//
+// Exported because the growth is large and automatic: the server indexes in
+// the background, so an index built before this table existed gains ~400MB
+// within seconds of starting the server, and a progress bar reading "indexing"
+// does not convey that.
+func (d *DB) NeedsArchive() (bool, error) { return d.needsArchive() }
+
 // needsArchive reports whether any indexed session has no archived messages.
 //
 // The same shape as needsVectors, and for the same reason: the skip test
