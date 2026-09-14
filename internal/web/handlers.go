@@ -32,6 +32,11 @@ type pageData struct {
 	Selected *index.Summary
 	Query    string
 
+	// Sort is the requested order, empty for relevance. Carried on every link
+	// out of the list so that opening a result and coming back does not
+	// silently reorder the list underneath you.
+	Sort string
+
 	// Searching distinguishes "no sessions indexed" from "no matches".
 	Searching bool
 
@@ -74,7 +79,11 @@ type pageData struct {
 // newPage assembles the list pane, which every full page render needs.
 func (s *Server) newPage(r *http.Request) (pageData, error) {
 	q := r.URL.Query().Get("q")
-	rows, err := s.rowsFor(r.Context(), q)
+	sort := r.URL.Query().Get("sort")
+	if sort != SortNewest {
+		sort = SortRelevance // one unknown value should not become a third mode
+	}
+	rows, err := s.rowsFor(r.Context(), q, sort)
 	if err != nil {
 		return pageData{}, err
 	}
@@ -85,6 +94,7 @@ func (s *Server) newPage(r *http.Request) (pageData, error) {
 	data := pageData{
 		Sessions:      rows,
 		Query:         q,
+		Sort:          sort,
 		Searching:     strings.TrimSpace(q) != "",
 		SearchEnabled: s.engine != nil,
 		SessionCount:  count,
@@ -94,6 +104,10 @@ func (s *Server) newPage(r *http.Request) (pageData, error) {
 	}
 	return data, nil
 }
+
+// SortNewest reports whether the list is in date order, for the toggle's
+// active state.
+func (d pageData) SortNewest() bool { return d.Sort == SortNewest }
 
 // emptyNote says why a search returned nothing.
 func emptyNote(query string) string {

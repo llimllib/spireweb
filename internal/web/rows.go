@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"html/template"
+	stdsort "sort"
 	"strings"
 
 	"github.com/llimllib/spireweb/internal/index"
@@ -54,9 +55,20 @@ func (r row) Subtitle() template.HTML {
 	return template.HTML(escaped) //nolint:gosec // escaped above, markers are ours
 }
 
+// Sort orders for the list pane.
+const (
+	SortRelevance = ""
+	SortNewest    = "new"
+)
+
 // rowsFor returns the list pane's contents: search results when there is a
 // query, the chronological list when there is not.
-func (s *Server) rowsFor(ctx context.Context, q string) ([]row, error) {
+//
+// sort reorders results without changing which ones there are. Sorting by date
+// is not a worse ranking, it is a different question: "the grafana session I
+// had on Friday" is a memory of when, and no amount of relevance tuning
+// answers it as directly as putting them in order.
+func (s *Server) rowsFor(ctx context.Context, q, sort string) ([]row, error) {
 	q = strings.TrimSpace(q)
 	if q == "" || s.engine == nil {
 		summaries, err := s.db.ListSessions(ctx, listLimit, 0)
@@ -88,6 +100,14 @@ func (s *Server) rowsFor(ctx context.Context, q string) ([]row, error) {
 			r.Excerpt = res.BestText
 		}
 		rows = append(rows, r)
+	}
+
+	if sort == SortNewest {
+		// Stable so that two sessions started in the same second keep the
+		// order relevance gave them.
+		stdsort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].StartedAt.After(rows[j].StartedAt)
+		})
 	}
 	return rows, nil
 }

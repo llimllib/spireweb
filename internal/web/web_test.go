@@ -679,3 +679,107 @@ func TestQuotedSearchTintsOnlyPhraseMatches(t *testing.T) {
 		t.Errorf("tinted turn = %q, want m1", id)
 	}
 }
+
+// Relevance cannot answer "the grafana session I had on Friday", because that
+// is a memory of when rather than of what.
+func TestSortNewestOrdersResultsByDate(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		// newFixture timestamps ascend with the id, so ccc is newest. Give the
+		// oldest the strongest match so relevance and date disagree.
+		"aaa": {userMsg("grafana grafana grafana dashboards everywhere")},
+		"bbb": {userMsg("a passing mention of grafana")},
+		"ccc": {userMsg("grafana came up again today")},
+	})
+
+	byRelevance := sessionOrder(t, f, "/?q="+url.QueryEscape("grafana"))
+	if byRelevance[0] != "aaa" {
+		t.Errorf("relevance order = %v, want the densest match first", byRelevance)
+	}
+
+	byDate := sessionOrder(t, f, "/?q="+url.QueryEscape("grafana")+"&sort=new")
+	if strings.Join(byDate, ",") != "ccc,bbb,aaa" {
+		t.Errorf("date order = %v, want newest first", byDate)
+	}
+	// Sorting reorders results; it does not change which ones there are.
+	if len(byDate) != len(byRelevance) {
+		t.Errorf("sorting changed the result count: %d vs %d", len(byDate), len(byRelevance))
+	}
+}
+
+// The order has to survive opening a result, or it undoes itself the moment
+// it is used.
+func TestSortIsCarriedOnRowLinks(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("grafana dashboards")},
+		"bbb": {userMsg("grafana again")},
+	})
+
+	_, doc := f.get(t, "/?q="+url.QueryEscape("grafana")+"&sort=new")
+	href, _ := doc.Find("a.row").First().Attr("href")
+	if !strings.Contains(href, "sort=new") {
+		t.Errorf("row href = %q, want it to carry the sort", href)
+	}
+	if !strings.Contains(href, "q=grafana") {
+		t.Errorf("row href = %q, want it to carry the query", href)
+	}
+
+	// And the search box carries it too, so typing another letter does not
+	// snap back to relevance.
+	if doc.Find(`.search input[name="sort"][value="new"]`).Length() != 1 {
+		t.Error("no hidden sort field in the search form")
+	}
+}
+
+func TestSortToggleShowsTheActiveOrder(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("grafana dashboards")}})
+
+	// Browsing is already newest-first, so there is no choice to offer.
+	_, doc := f.get(t, "/")
+	if doc.Find(".sortbar").Length() != 0 {
+		t.Error("sort toggle shown while browsing")
+	}
+
+	_, doc = f.get(t, "/?q="+url.QueryEscape("grafana"))
+	active := doc.Find(".sortbar .sort.is-active")
+	if active.Length() != 1 || strings.TrimSpace(active.Text()) != "relevance" {
+		t.Errorf("active sort = %q, want relevance by default", active.Text())
+	}
+	// The active one is state, not an action: no href to click.
+	if _, ok := active.Attr("href"); ok {
+		t.Error("the active sort is a link to itself")
+	}
+
+	_, doc = f.get(t, "/?q="+url.QueryEscape("grafana")+"&sort=new")
+	active = doc.Find(".sortbar .sort.is-active")
+	if strings.TrimSpace(active.Text()) != "newest" {
+		t.Errorf("active sort = %q, want newest", active.Text())
+	}
+}
+
+// An unknown value must not become a third mode.
+func TestUnknownSortFallsBackToRelevance(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("grafana grafana grafana")},
+		"bbb": {userMsg("grafana once")},
+	})
+	got := sessionOrder(t, f, "/?q="+url.QueryEscape("grafana")+"&sort=sideways")
+	if got[0] != "aaa" {
+		t.Errorf("order = %v, want relevance", got)
+	}
+}
+
+// sessionOrder returns the session ids the list renders, in order.
+func sessionOrder(t *testing.T, f *fixture, path string) []string {
+	t.Helper()
+	_, doc := f.get(t, path)
+	var out []string
+	doc.Find("a.row").Each(func(_ int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		id := strings.TrimPrefix(href, "/sessions/")
+		if i := strings.IndexByte(id, '?'); i >= 0 {
+			id = id[:i]
+		}
+		out = append(out, id)
+	})
+	return out
+}

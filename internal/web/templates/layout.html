@@ -25,6 +25,9 @@
            autocomplete="off" spellcheck="false"
            {{- if .SearchEnabled }}
            hx-get="/search"
+           {{- /* The whole form, so the chosen sort survives the next
+                  keystroke rather than snapping back to relevance. */}}
+           hx-include="closest form"
            hx-trigger="input changed delay:150ms, search"
            hx-target="#rows"
            hx-swap="outerHTML"
@@ -32,7 +35,20 @@
            {{- else }}
            disabled title="Search needs an index built with embeddings"
            {{- end }}>
+    {{- if .SortNewest }}<input type="hidden" name="sort" value="new">{{ end }}
   </form>
+
+  {{- /* Plain links, not an htmx swap: changing the order is a deliberate act
+         a few times a session, the state belongs in the URL, and the pane the
+         toggle lives in is not the one htmx replaces. */ -}}
+  {{- if .Searching }}
+  <div class="sortbar" role="group" aria-label="Sort results">
+    <a class="sort{{if not .SortNewest}} is-active{{end}}"
+       {{- if .SortNewest}} href="/search?q={{.Query}}"{{else}} aria-current="true"{{end}}>relevance</a>
+    <a class="sort{{if .SortNewest}} is-active{{end}}"
+       {{- if .SortNewest}} aria-current="true"{{else}} href="/search?q={{.Query}}&amp;sort=new"{{end}}>newest</a>
+  </div>
+  {{- end }}
 
   {{- /* Seeded server-side with the count this page rendered with, so the
          poll can report new sessions without per-client state. */ -}}

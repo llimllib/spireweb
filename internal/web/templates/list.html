@@ -6,7 +6,7 @@
     {{- /* The query rides along so that opening a result keeps the filtered
            list beside it, and going back returns to the same search. */ -}}
     <a class="row{{if $selected}} is-selected{{end}}"
-       href="/sessions/{{.ID}}{{if $.Query}}?q={{$.Query}}{{end}}"
+       href="/sessions/{{.ID}}{{if $.Query}}?q={{$.Query}}{{if $.SortNewest}}&amp;sort=new{{end}}{{end}}"
        {{- if $selected}} aria-current="page"{{end}}>
       <span class="row-meta">
         <span class="row-project" title="{{.CWD}}">{{.Project}}</span>

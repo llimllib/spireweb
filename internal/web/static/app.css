@@ -119,6 +119,33 @@ body {
 
 .search input:disabled { opacity: 0.55; }
 
+/* Sort toggle, shown only while searching: browsing is already in date order,
+   so offering the choice there would be offering the same list twice. */
+.sortbar {
+  display: flex;
+  gap: var(--space-2xs);
+  flex: none;
+  font-size: var(--text-xs);
+}
+
+.sortbar .sort {
+  padding: var(--space-3xs) var(--space-2xs);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sortbar .sort:hover { background: var(--bg-sunken); color: var(--fg); }
+
+/* The active one is not a link, so it reads as state rather than as an
+   action that does nothing. */
+.sortbar .sort.is-active {
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .search input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
