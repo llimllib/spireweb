@@ -176,10 +176,33 @@ model loads, and returns nothing until vectors exist.
 ## Titles
 
 `sessions.title` is written by `internal/titles`, a pass that runs *after* a
-build and never during one: both write, and the writer is one connection. It
-needs `ANTHROPIC_API_KEY`; without it the pass is skipped with a note, and
-every row falls back to its opening message, which is what the list did for
-five milestones. `ANTHROPIC_BASE_URL` points it at a fake or a gateway.
+build and never during one: both write, and the writer is one connection.
+Without a backend the pass is skipped with a note and every row falls back to
+its opening message, which is what the list did for five milestones.
+
+Two backends, chosen with `--titles-via`:
+
+- `api` needs `ANTHROPIC_API_KEY`, and `ANTHROPIC_BASE_URL` points it at a fake
+  or a gateway. ~1s a call.
+- `claude` shells out to `claude -p`, which bills whatever authentication
+  Claude Code has, including a Pro or Max subscription. ~4.5s a call, nearly
+  all of it starting Node, so `CLIConcurrency` is 4 rather than 8 -- and its
+  rate limit is shared with the interactive sessions the subscription is for.
+
+There is no `auto`. Picking the CLI because no API key was set would spend a
+subscription's rate limit on a thousand sessions without being asked; the
+missing-key note names the flag instead.
+
+The CLI runs in an empty temp directory with `--strict-mcp-config
+--setting-sources ""`. In a project it discovers CLAUDE.md, settings and
+plugins, all to write eight words.
+
+The instructions are repeated **after** the transcript, which is fenced on both
+sides. Everything is one message there, the slice is cut at 10k characters, and
+without the closing half a transcript ending mid-sentence drew *"Your message
+cuts off mid-sentence. Could you complete the question?"* as a title. Passing
+them via `--system-prompt` is worse still: it replaces Claude Code's own, and
+the model answers the transcript instead of titling it.
 
 Two columns decide whether a session is paid for again, and they guard
 different costs:

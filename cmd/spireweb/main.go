@@ -42,6 +42,8 @@ flags:
   --no-watch     do not index in the background while serving
   --no-titles    do not generate session titles with an LLM
   --titles N     stop after generating N titles (0 for no limit)
+  --titles-via   api (ANTHROPIC_API_KEY) or claude (the Claude Code CLI,
+                 which bills a Pro/Max subscription rather than the API)
 `
 
 func main() {
@@ -65,16 +67,17 @@ func main() {
 	// possible -- newest sessions first, so it titles what is worth looking at
 	// -- before committing to all eleven hundred.
 	titleLimit := fs.Int("titles", 0, "stop after generating N titles")
+	titleVia := fs.String("titles-via", titles.BackendAPI, "api or claude")
 	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir()) }
 
 	var err error
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch, *noTitles)
+		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		err = runIndex(*dbPath, *dir, *full, *lexical, *noTitles, *titleLimit)
+		err = runIndex(*dbPath, *dir, *full, *lexical, *noTitles, *titleLimit, *titleVia)
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
 		err = runStats(*dbPath)
@@ -157,7 +160,7 @@ func openIndex(path string, lexical bool) (*index.DB, index.Embedder, error) {
 	return db, e, nil
 }
 
-func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) error {
+func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int, titleVia string) error {
 	db, embedder, err := openIndex(dbPath, lexical)
 	if err != nil {
 		return err
@@ -218,12 +221,12 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int) 
 	if noTitles {
 		return nil
 	}
-	return runTitles(ctx, db, titleLimit)
+	return runTitles(ctx, db, titleLimit, titleVia)
 }
 
-// summarizer builds the title generator from the environment.
-func summarizer() (titles.Summarizer, error) {
-	return titles.NewAnthropic()
+// summarizer builds the title generator for the chosen backend.
+func summarizer(via string) (titles.Summarizer, error) {
+	return titles.NewSummarizer(via)
 }
 
 // runTitles generates titles for sessions that do not have one.
@@ -232,8 +235,8 @@ func summarizer() (titles.Summarizer, error) {
 // happens here. Missing configuration is a note rather than an error: titles
 // are an improvement to the list, and an index without them is the index this
 // tool had for its first five milestones.
-func runTitles(ctx context.Context, db *index.DB, limit int) error {
-	s, err := summarizer()
+func runTitles(ctx context.Context, db *index.DB, limit int, via string) error {
+	s, err := summarizer(via)
 	if err != nil {
 		note("skipping titles: %v", err)
 		return nil
@@ -242,8 +245,9 @@ func runTitles(ctx context.Context, db *index.DB, limit int) error {
 	start := time.Now()
 	var lastReport time.Time
 	p, err := titles.Run(ctx, db, titles.Options{
-		Summarizer: s,
-		Limit:      limit,
+		Summarizer:  s,
+		Limit:       limit,
+		Concurrency: titles.ConcurrencyFor(s),
 		OnProgress: func(p titles.Progress) {
 			if p.Total == 0 {
 				return
