@@ -783,3 +783,59 @@ func sessionOrder(t *testing.T, f *fixture, path string) []string {
 	})
 	return out
 }
+
+// setTitle writes a generated title and reindexes, the way the titles pass
+// and the next build do.
+func (f *fixture) setTitle(t *testing.T, id, title string) {
+	t.Helper()
+	db, err := index.Open(f.dbPath, index.DriverName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SetTitle(context.Background(), id, title, "k", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: f.dir}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The title is the line the list shows in bold. Searching for a word that
+// appears only there used to return nothing.
+func TestTitlesAreSearchable(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("we built the dashboard for the v1 external API")},
+		"bbb": {userMsg("something else entirely")},
+	})
+	f.setTitle(t, "aaa", "Grafana dashboard for the v1 API")
+
+	_, doc := f.get(t, "/?q=grafana")
+	rows := doc.Find("a.row")
+	if rows.Length() != 1 {
+		t.Fatalf("rows = %d, want the session whose title says grafana", rows.Length())
+	}
+	if href, _ := rows.Attr("href"); !strings.Contains(href, "aaa") {
+		t.Errorf("row = %q, want aaa", href)
+	}
+}
+
+// A title belongs to no message, so a hit on one must not scroll the reading
+// pane to a message that does not exist.
+func TestTitleMatchDoesNotScrollAnywhere(t *testing.T) {
+	f := newFixture(t, map[string][]string{
+		"aaa": {userMsg("we built the dashboard for the v1 external API")},
+	})
+	f.setTitle(t, "aaa", "Grafana dashboard for the v1 API")
+
+	rec, doc := f.get(t, "/sessions/aaa?q=grafana")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if _, ok := doc.Find(".reading").Attr("data-scroll-to"); ok {
+		t.Error("a title-only match set a scroll target")
+	}
+	if n := doc.Find(".turn.is-match").Length(); n != 0 {
+		t.Errorf("marked turns = %d, want none: no message matched", n)
+	}
+}

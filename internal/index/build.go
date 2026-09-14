@@ -121,6 +121,16 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		opts.Full = archiveBackfill
 	}
 
+	// And once more for titles, which are written after a build finishes and
+	// so are never indexed by the run that generated them.
+	if !opts.Full {
+		need, err := d.needsTitleChunks()
+		if err != nil {
+			return Progress{Err: err}, err
+		}
+		opts.Full = need
+	}
+
 	files, err := session.Discover(opts.Dir)
 	if err != nil {
 		return Progress{Err: err}, fmt.Errorf("discover %s: %w", opts.Dir, err)
@@ -235,6 +245,20 @@ func (d *DB) upsertSession(ctx context.Context, s *session.Session, opts BuildOp
 	defer tx.Rollback()
 
 	blocks := s.Chunks(opts.ChunkChars)
+
+	// The generated title, indexed as a chunk of its own so that the line the
+	// list shows in bold is searchable. It is the densest sentence about a
+	// session anywhere in the database -- written for exactly that purpose --
+	// and it was the one sentence search could not see.
+	//
+	// Prepended rather than appended only so that it is obvious in a dump.
+	if title, err := titleOf(ctx, tx, s.ID); err != nil {
+		return 0, 0, err
+	} else if title != "" {
+		blocks = append([]session.TextBlock{{
+			MsgIdx: TitleMsgIdx, Role: RoleTitle, Text: title,
+		}}, blocks...)
+	}
 
 	// Enforce the model's token limit before anything reaches the embedder.
 	// Character-based chunking cannot predict token count: 800 chars of prose is
