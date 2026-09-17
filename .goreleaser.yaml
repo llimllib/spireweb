@@ -97,11 +97,35 @@ homebrew_casks:
       owner: llimllib
       name: homebrew-tap
       branch: main
-      # GITHUB_TOKEN cannot push to another repository, so this needs a PAT
-      # secret on the spireweb repo.
+      # a token that allows pushing to llimllib/homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    # Homebrew clears quarantine on its own downloads, so there is no
-    # notarization step and no gatekeeper prompt to talk anyone through.
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    # Homebrew quarantines cask artifacts by default -- that is what
+    # --no-quarantine exists to override -- and nothing here is signed by a
+    # Developer ID, only adhoc/linker-signed. Without this both files are
+    # refused: the binary dies with "Killed: 9" behind an "Apple could not
+    # verify" dialog, and the dylib fails dlopen with a misleading "no such
+    # file" that degrades silently to keyword-only search.
+    #
+    # Recursive over the whole staged path rather than naming the binary, which
+    # is where this differs from the other casks in the tap: the extension is
+    # dlopen'd and needs clearing just as much as the executable does.
+    #
+    # The inner quoting is a Go template emitting a literal {{staged_path}},
+    # which is Homebrew's placeholder, not goreleaser's.
+    #
+    # The real fix is a Developer ID signature and notarization, which
+    # goreleaser supports through notarize.macos. That would also cover someone
+    # who downloads the tarball directly, which this does not.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}"]
+        end
+      end
     caveats: |
       spireweb indexes your agent sessions on first run.
 
