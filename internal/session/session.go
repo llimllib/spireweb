@@ -1,7 +1,13 @@
-// Package session parses pi agent session files.
+// Package session parses agent session files.
 //
-// Sessions live in ~/.pi/agent/sessions/<mangled-cwd>/<timestamp>_<uuid>.jsonl
-// as JSON Lines. The first line is a header; subsequent lines are events.
+// Two formats, both JSON Lines, told apart by their first line and handled by
+// one Parse: pi's is documented below, Claude Code's in claude.go. Everything
+// downstream consumes *Session and never sees bytes, which is what keeps the
+// difference to this package.
+//
+// pi sessions live in
+// ~/.pi/agent/sessions/<mangled-cwd>/<timestamp>_<uuid>.jsonl. The first line
+// is a header; subsequent lines are events.
 //
 // Note the stored format differs from the streaming event format documented in
 // pi's docs/json.md (message_start/message_update/...). Stored files were
@@ -272,6 +278,7 @@ func parse(path string, keepRaw bool) (*Session, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 
 	first := true
+	claude := false
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -281,10 +288,37 @@ func parse(path string, keepRaw bool) (*Session, error) {
 		if first {
 			first = false
 			var h Header
-			if err := json.Unmarshal(line, &h); err != nil || h.Type != "session" {
+			if err := json.Unmarshal(line, &h); err == nil && h.Type == "session" {
+				s.ID, s.CWD, s.StartedAt = h.ID, h.CWD, h.Timestamp
+				continue
+			}
+			if !isClaudeLine(line) {
 				return nil, fmt.Errorf("%s: missing session header", filepath.Base(path))
 			}
-			s.ID, s.CWD, s.StartedAt = h.ID, h.CWD, h.Timestamp
+			claude = true
+			// Deliberately no continue: a Claude Code file has no header, so
+			// this first line is a record like any other and has to be parsed.
+		}
+
+		if claude {
+			var r claudeRecord
+			if err := json.Unmarshal(line, &r); err != nil {
+				s.SkippedLines++
+				continue
+			}
+			// Metadata repeats on every record rather than sitting in a
+			// header, and the record types that carry none of it are
+			// interleaved with those that do, so take the first of each.
+			if s.ID == "" {
+				s.ID = r.SessionID
+			}
+			if s.CWD == "" {
+				s.CWD = r.CWD
+			}
+			if s.StartedAt.IsZero() {
+				s.StartedAt = r.Timestamp
+			}
+			s.Messages = append(s.Messages, parseClaudeLine(&r, line, keepRaw)...)
 			continue
 		}
 
