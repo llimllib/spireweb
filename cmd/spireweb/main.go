@@ -214,6 +214,13 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int, 
 
 	fmt.Printf("indexed %d sessions (%d chunks, %d messages archived) in %s\n",
 		p.Indexed, p.Chunks, p.Messages, time.Since(start).Round(time.Millisecond))
+	if p.Excluded > 0 {
+		// Named rather than folded into "skipped", which means unchanged. A
+		// corpus that is mostly excluded is a surprising thing to discover from
+		// a session count that looks too low.
+		note("excluded %d files driven through the SDK rather than typed "+
+			"(claude-bridge duplicates, and spireweb's own title prompts)", p.Excluded)
+	}
 	if embedder == nil {
 		note("built without embeddings; search will be keyword-only")
 	}

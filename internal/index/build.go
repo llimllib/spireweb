@@ -29,6 +29,7 @@ type Progress struct {
 	Done     int    // files examined
 	Indexed  int    // files parsed and written
 	Skipped  int    // unchanged since last run
+	Excluded int    // not a session worth indexing; see session.SkipReason
 	Failed   int    // unparseable
 	Chunks   int    // chunks written this run
 	Current  string // file being worked on
@@ -148,18 +149,35 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		if err := ctx.Err(); err != nil {
 			return p, err
 		}
-		seen[f.Path] = true
 		p.Done++
 		p.Current = f.Path
 
 		if !opts.Full {
 			if prev, ok := known[f.Path]; ok &&
 				prev.mtime == f.ModTime.UnixNano() && prev.size == f.Size {
+				seen[f.Path] = true
 				p.Skipped++
 				report(p)
 				continue
 			}
 		}
+
+		// After the mtime test, not before: this reads the file, and an already
+		// indexed session that has not changed should cost a stat and nothing
+		// more. The consequence is that an index built before a file became
+		// excluded keeps it until a full pass, which is the same bargain
+		// needsVectors and needsArchive make.
+		//
+		// Deliberately not marked seen: the sweep below then removes it, so a
+		// session indexed before this rule existed is dropped rather than left
+		// behind with nothing to refresh it.
+		if session.SkipReason(f.Path) != "" {
+			p.Excluded++
+			report(p)
+			continue
+		}
+
+		seen[f.Path] = true
 
 		// WithRaw because indexing is what fills the archive, and the archive
 		// stores what pi wrote rather than what this code understood.
