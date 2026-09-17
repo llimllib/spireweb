@@ -31,6 +31,11 @@ before:
     # goreleaser.
     - mise run ts
 
+    # Builds the sqlite-lembed dylib and downloads the model, then copies both
+    # into build/ for the archive below. Idempotent; the slow part only runs
+    # when they are missing.
+    - mise run release-assets
+
 builds:
   - id: spireweb
     main: ./cmd/spireweb
@@ -55,6 +60,18 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_macos_arm64"
     files:
       - README.md
+      - NOTICE.md
+      # Flat, beside the binary, because that is where embed.DefaultPaths looks:
+      # it resolves the executable and checks its own directory first. A
+      # Homebrew cask symlinks only spireweb onto PATH and leaves everything
+      # else in the Caskroom, so resolving through the symlink is what finds
+      # these.
+      - src: build/lembed0.dylib
+        dst: .
+        strip_parent: true
+      - src: build/all-MiniLM-L6-v2.Q8_0.gguf
+        dst: .
+        strip_parent: true
 
 changelog:
   sort: asc
@@ -64,10 +81,40 @@ changelog:
       - "^test:"
       - "^chore:"
 
+# A cask, not a formula. git-ls uses goreleaser's `brews:` block because that
+# was the preferred path when it was written; Homebrew has since moved prebuilt
+# binaries to casks, and llimllib/homebrew-tap already holds only Casks/.
+homebrew_casks:
+  - name: spireweb
+    homepage: "https://github.com/llimllib/spireweb"
+    description: "Search and read pi agent sessions"
+    # Only the binary goes onto PATH. The extension and the model stay in the
+    # Caskroom beside it, which embed.DefaultPaths finds by resolving the
+    # symlink -- see internal/embed/paths_test.go.
+    binaries:
+      - spireweb
+    repository:
+      owner: llimllib
+      name: homebrew-tap
+      branch: main
+      # GITHUB_TOKEN cannot push to another repository, so this needs a PAT
+      # secret on the spireweb repo.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # Homebrew clears quarantine on its own downloads, so there is no
+    # notarization step and no gatekeeper prompt to talk anyone through.
+    caveats: |
+      spireweb indexes your agent sessions on first run.
+
+      The first semantic search compiles Metal shaders and takes about
+      15 seconds; subsequent runs are instant until macOS evicts its
+      shader cache.
+
 release:
   footer: |
     ---
 
-    This archive is the binary alone. Semantic search additionally needs the
-    sqlite-lembed extension and the embedding model; without them spireweb
-    falls back to keyword-only search. `mise run setup` installs both.
+    The archive carries the sqlite-lembed extension and the embedding model
+    beside the binary, so semantic search works from an unpacked tarball with
+    nothing else installed.
+
+    `brew install llimllib/tap/spireweb`

@@ -19,3 +19,6 @@
 
 # goreleaser output.
 /dist/
+
+# Release assets staged by `mise run release-assets`.
+/build/

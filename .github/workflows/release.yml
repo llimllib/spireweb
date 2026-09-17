@@ -39,6 +39,21 @@ jobs:
           key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-${{ runner.os }}-
 
+      # The release archive ships the sqlite-lembed extension and the embedding
+      # model beside the binary, and `mise run release-assets` builds the first
+      # from source. That is a llama.cpp checkout and a couple of minutes of
+      # cmake, unchanged between releases, so it is worth keeping.
+      #
+      # Building needs cmake, which the macOS runner image already provides.
+      # Compiling Metal shaders does not need a GPU; only running the model
+      # does, which is why the semantic tests skip here and the smoke test
+      # below checks the paths rather than the search.
+      - name: Cache the extension and model
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/spireweb
+          key: lembed-${{ runner.os }}-${{ hashFiles('mise-tasks/setup') }}
+
       # For `mise run ts`, which .goreleaser.yaml runs as a before hook:
       # internal/web embeds internal/web/static, and app.js is generated.
       - run: pnpm install --frozen-lockfile
@@ -50,3 +65,7 @@ jobs:
         run: mise run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing the cask means committing to llimllib/homebrew-tap,
+          # which GITHUB_TOKEN has no access to. A PAT with contents:write on
+          # that repository.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -115,6 +115,21 @@ description = "Download the browser the e2e tests drive"
 # running this again; Playwright says so itself when the build is missing.
 run = "pnpm exec playwright install chromium"
 
+[tasks.release-assets]
+description = "Stage the extension and model for the release archive"
+# The release archive ships these beside the binary, because embed.DefaultPaths
+# resolves the executable and looks next to it -- which is what makes both the
+# extracted tarball and the Homebrew cask work without a build-time prefix.
+#
+# setup is idempotent and does the hard part (building the dylib from the
+# landrix fork, downloading the model); this only copies its output somewhere
+# .goreleaser.yaml can name relatively.
+depends = ["setup"]
+run = [
+  "mkdir -p build",
+  'cp "$SPIREWEB_DATA_DIR/lembed0.dylib" "$SPIREWEB_DATA_DIR/all-MiniLM-L6-v2.Q8_0.gguf" build/',
+]
+
 [tasks.release]
 description = "Publish a release for the current tag (run by CI on a v* tag)"
 # Through mise rather than bare goreleaser, because .goreleaser.yaml needs the
@@ -129,4 +144,4 @@ description = "Build the release artifacts locally, without tagging or publishin
 run = "goreleaser release --snapshot --clean"
 
 [tasks.clean]
-run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map && rm -rf test-results playwright-report dist"
+run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map && rm -rf test-results playwright-report dist build"

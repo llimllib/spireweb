@@ -154,23 +154,64 @@ type Paths struct {
 	Model     string // *.gguf
 }
 
-// DefaultPaths returns the standard install location.
+// ModelFile is the embedding model's filename, shared by the install layout
+// and by mise-tasks/setup, which downloads it.
+const ModelFile = "all-MiniLM-L6-v2.Q8_0.gguf"
+
+// DefaultPaths returns the first install location that actually holds both
+// files, falling back to the development one so that a missing install reports
+// the path 'mise run setup' would fill.
+//
+// Two layouts have to work. A developer's is ~/.local/share/spireweb, written
+// by mise-tasks/setup. A release's is the extracted archive, where the
+// extension and model sit next to the binary -- which is also how a Homebrew
+// cask ends up: the cask stages the archive in the Caskroom and symlinks only
+// spireweb onto PATH, so the sibling files are reachable from the resolved
+// executable and from nowhere else predictable.
+//
+// Resolving the executable rather than stamping a prefix in at build time means
+// the archive works wherever it is unpacked, and means the release build and
+// the development build are the same binary.
 func DefaultPaths() Paths {
-	dir := defaultDir()
+	dirs := candidateDirs()
+	for _, dir := range dirs {
+		p := pathsIn(dir)
+		if p.Check() == nil {
+			return p
+		}
+	}
+	return pathsIn(dirs[len(dirs)-1])
+}
+
+func pathsIn(dir string) Paths {
 	return Paths{
 		Extension: filepath.Join(dir, extensionFile()),
-		Model:     filepath.Join(dir, "all-MiniLM-L6-v2.Q8_0.gguf"),
+		Model:     filepath.Join(dir, ModelFile),
 	}
 }
 
-func defaultDir() string {
+// candidateDirs lists install locations in precedence order. Never empty: the
+// last entry is the answer to "where would setup put these", which is what an
+// error message wants to name.
+func candidateDirs() []string {
+	var dirs []string
 	if d := os.Getenv("SPIREWEB_DATA_DIR"); d != "" {
-		return d
+		dirs = append(dirs, d)
+	}
+	if exe, err := os.Executable(); err == nil {
+		// Through the symlink, not to it: Homebrew puts the symlink on PATH and
+		// the files beside the target.
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		dirs = append(dirs, filepath.Dir(exe))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share", "spireweb")
+		dirs = append(dirs, filepath.Join(home, ".local", "share", "spireweb"))
+	} else {
+		dirs = append(dirs, ".")
 	}
-	return "."
+	return dirs
 }
 
 // ErrUnavailable indicates the extension or model is not installed. Callers
