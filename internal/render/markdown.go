@@ -118,12 +118,19 @@ func Markdown(src string) template.HTML {
 	return template.HTML(buf.String()) //nolint:gosec // goldmark ran with raw HTML disabled
 }
 
-// ChromaCSS returns the stylesheet for highlighted code, with the dark theme
-// behind a prefers-color-scheme media query.
+// ChromaCSS returns the stylesheet for highlighted code, with each theme
+// behind its own prefers-color-scheme media query.
 //
 // Generated at runtime rather than committed, so the themes named above are
-// the only place the choice is recorded. Both themes emit the same class
-// names, so the media query block simply overrides the light rules.
+// the only place the choice is recorded.
+//
+// Both blocks are scoped, rather than letting the dark one override an
+// unscoped light one, because a theme emits a rule only for the token types
+// it colours. github-dark leaves punctuation and plain identifiers (.p, .nx,
+// .na, .nb, .bp) to inherit from .chroma, so with the light rules always in
+// force those tokens kept github's near-black on a near-black background and
+// most of a code block was invisible in dark mode. A light query matches when
+// the user has no preference as well, so nothing is left unstyled.
 var ChromaCSS = sync.OnceValue(func() string {
 	var b strings.Builder
 	formatter := chromahtml.New(chromahtml.WithClasses(true))
@@ -136,8 +143,9 @@ var ChromaCSS = sync.OnceValue(func() string {
 		_ = formatter.WriteCSS(&b, style)
 	}
 
+	b.WriteString("@media (prefers-color-scheme: light) {\n")
 	writeStyle(lightStyle)
-	b.WriteString("\n@media (prefers-color-scheme: dark) {\n")
+	b.WriteString("}\n@media (prefers-color-scheme: dark) {\n")
 	writeStyle(darkStyle)
 	b.WriteString("}\n")
 	return b.String()

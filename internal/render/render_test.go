@@ -93,8 +93,34 @@ func TestChromaCSSHasBothThemes(t *testing.T) {
 	if !strings.Contains(css, "@media (prefers-color-scheme: dark)") {
 		t.Error("no dark theme block")
 	}
+	if !strings.Contains(css, "@media (prefers-color-scheme: light)") {
+		t.Error("no light theme block")
+	}
 	if strings.Count(css, "/* Keyword */") < 2 {
 		t.Error("expected the same classes emitted twice, once per theme")
+	}
+}
+
+// Every rule must sit inside a media query. An unscoped theme leaks into the
+// other scheme for each token type the other theme does not colour -- which
+// github-dark does not for punctuation and plain identifiers, so a code block
+// rendered near-black on near-black.
+func TestChromaCSSRulesAreAllScoped(t *testing.T) {
+	depth := 0
+	for _, line := range strings.Split(ChromaCSS(), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "@media"):
+			depth++
+		case line == "}":
+			depth--
+		case depth == 0:
+			t.Errorf("rule outside a media query: %s", line)
+		}
+	}
+	if depth != 0 {
+		t.Errorf("unbalanced braces: depth %d", depth)
 	}
 }
 
