@@ -86,7 +86,7 @@ run = "./spireweb index"
 
 [tasks."dev:go"]
 description = "Run the server, rebuilding on change"
-run = "wgo run ./cmd/spireweb serve --dev"
+run = "wgo run ./cmd/spireweb serve --dev --titles-via=claude"
 
 [tasks."dev:ts"]
 description = "Compile TypeScript on change"
