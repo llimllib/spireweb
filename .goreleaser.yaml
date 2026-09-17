@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+#
+# darwin/arm64 only, deliberately. go-sqlite3, the sqlite-vec bindings and
+# FTS5 all need cgo, so CGO_ENABLED=0 -- which is how the other repositories
+# here cross-compile four ways from one runner -- is not available. Restricting
+# the target to the one architecture everybody involved runs removes the cross
+# compilation problem rather than solving it: a macos runner is already arm64,
+# so nothing is cross-compiled at all.
+#
+# Must run under mise, which is where CGO_CFLAGS comes from. See the preflight
+# hook below, and `mise run release`.
+version: 2
+
+before:
+  hooks:
+    # sqlite-vec's cgo bindings compile with #include "sqlite3.h", and the
+    # header they get has to be the one matching the amalgamation go-sqlite3
+    # actually links rather than whatever the machine has. CGO_CFLAGS points at
+    # third_party/sqlite; mise.toml sets it, and a release built without it
+    # compiles perfectly well against the wrong struct layouts. Fail loudly
+    # instead.
+    - >-
+      sh -c 'case "$CGO_CFLAGS" in *third_party/sqlite*) ;;
+      *) echo "CGO_CFLAGS does not point at third_party/sqlite -- run it through mise, with (mise run release)" >&2; exit 1 ;; esac'
+
+    # Both generated, neither committed, both required.
+    - mise run sqlite-header
+    # internal/web embeds internal/web/static, and app.js is compiled from
+    # TypeScript. A missing one is embedded silently and ships the previous
+    # release's keyboard handling, so this cannot be left to whoever invokes
+    # goreleaser.
+    - mise run ts
+
+builds:
+  - id: spireweb
+    main: ./cmd/spireweb
+    binary: spireweb
+    goos: [darwin]
+    goarch: [arm64]
+    env:
+      - CGO_ENABLED=1
+    # Explicit rather than inherited from mise.toml's GOFLAGS. Without the tag
+    # the binary builds and then fails at runtime with "no such module: fts5",
+    # which is not a thing to learn from a bug report.
+    flags:
+      - -tags=sqlite_fts5
+    ldflags:
+      # main.Version, not the main.version goreleaser defaults to: the variable
+      # already exists and `mise run build` already stamps it the same way.
+      - -s -w -X main.Version={{ .Version }}
+
+archives:
+  - formats: ["tar.gz"]
+    # One target, so there is nothing to template: the name says what it is.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_macos_arm64"
+    files:
+      - README.md
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  footer: |
+    ---
+
+    This archive is the binary alone. Semantic search additionally needs the
+    sqlite-lembed extension and the embedding model; without them spireweb
+    falls back to keyword-only search. `mise run setup` installs both.

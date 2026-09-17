@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Not ubuntu, unlike CI. The binary needs cgo -- go-sqlite3, the sqlite-vec
+    # bindings and FTS5 all do -- so it has to be built on the platform it runs
+    # on. macos-latest is arm64, which is the only target .goreleaser.yaml
+    # declares, so nothing is cross-compiled.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # goreleaser builds the changelog from the commits since the previous
+          # tag, and a shallow clone has neither.
+          fetch-depth: 0
+
+      # Brings go, node, pnpm and goreleaser, and with them the [env] block --
+      # GOFLAGS, and the CGO_CFLAGS that points cgo at the staged sqlite3.h.
+      # .goreleaser.yaml refuses to build without the latter rather than
+      # compiling against whichever header the runner happens to ship.
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+
+      - name: Cache Go build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      # For `mise run ts`, which .goreleaser.yaml runs as a before hook:
+      # internal/web embeds internal/web/static, and app.js is generated.
+      - run: pnpm install --frozen-lockfile
+
+      # The same gate CI applies, on the artifact that goes out to people.
+      - run: mise run check
+
+      - name: Release
+        run: mise run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

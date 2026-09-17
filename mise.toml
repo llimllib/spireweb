@@ -11,6 +11,9 @@ node = "24"
 "npm:pnpm" = "10.15.0"
 golangci-lint = "latest"
 "go:github.com/bokwoon95/wgo" = "latest"
+# Pinned to a major version: goreleaser's configuration schema is versioned,
+# and .goreleaser.yaml declares `version: 2`.
+goreleaser = "2"
 
 [env]
 # mattn/go-sqlite3 omits FTS5 unless this tag is set, and without it the schema
@@ -112,5 +115,18 @@ description = "Download the browser the e2e tests drive"
 # running this again; Playwright says so itself when the build is missing.
 run = "pnpm exec playwright install chromium"
 
+[tasks.release]
+description = "Publish a release for the current tag (run by CI on a v* tag)"
+# Through mise rather than bare goreleaser, because .goreleaser.yaml needs the
+# [env] block above -- CGO_CFLAGS in particular, which points cgo at the staged
+# sqlite3.h. A preflight hook in .goreleaser.yaml fails the build when it is
+# missing, rather than quietly compiling against whichever header the machine
+# happens to have.
+run = "goreleaser release --clean"
+
+[tasks.release-snapshot]
+description = "Build the release artifacts locally, without tagging or publishing"
+run = "goreleaser release --snapshot --clean"
+
 [tasks.clean]
-run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map && rm -rf test-results playwright-report"
+run = "rm -f spireweb internal/web/static/app.js internal/web/static/app.js.map && rm -rf test-results playwright-report dist"

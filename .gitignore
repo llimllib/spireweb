@@ -16,3 +16,6 @@
 
 # Staged from go-sqlite3 by `mise run sqlite-header`, derived from go.mod.
 /third_party/
+
+# goreleaser output.
+/dist/
