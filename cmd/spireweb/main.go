@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/llimllib/spireweb/internal/config"
 	"github.com/llimllib/spireweb/internal/embed"
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/session"
@@ -34,7 +35,8 @@ usage:
 
 flags:
   --db PATH      index location (default %s)
-  --dir PATH     session directory, repeatable (default: detected)
+  --dir PATH     session directory, repeatable (default: from the
+                 settings file, or detected)
   --full         reindex everything rather than what changed
   --lexical      skip semantic indexing, even if the model is installed
   --addr ADDR    serve on this address (default 127.0.0.1:8080)
@@ -76,27 +78,27 @@ func main() {
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		if d, derr := sessionDirs(dirs); derr != nil {
-			err = derr
+		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr); serr != nil {
+			err = serr
 		} else {
-			err = runServe(*dbPath, *addr, d, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
+			err = runServe(s.dbPath, s.addr, s.dirs, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
 		}
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		if d, derr := sessionDirs(dirs); derr != nil {
-			err = derr
+		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr); serr != nil {
+			err = serr
 		} else {
-			err = runIndex(*dbPath, d, *full, *lexical, *noTitles, *titleLimit, *titleVia)
+			err = runIndex(s.dbPath, s.dirs, *full, *lexical, *noTitles, *titleLimit, *titleVia)
 		}
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
-		err = runStats(*dbPath)
+		err = runStats(configuredDB(givenFlags(fs), *dbPath))
 	case "doctor":
 		_ = fs.Parse(os.Args[2:])
-		err = runDoctor(*dbPath)
+		err = runDoctor(configuredDB(givenFlags(fs), *dbPath))
 	case "info":
 		_ = fs.Parse(os.Args[2:])
-		err = runInfo(*dbPath, dirs)
+		err = runInfo(configuredDB(givenFlags(fs), *dbPath), dirs)
 	case "version":
 		fmt.Println("spireweb", Version)
 	default:
@@ -430,16 +432,29 @@ func runInfo(dbPath string, flagged dirList) error {
 	paths := embed.DefaultPaths()
 	fmt.Printf("spireweb %s (%s %s/%s)\n\n", Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 
-	sessions := "none found; looked in\n           " +
-		strings.Join(session.Candidates(), "\n           ")
-	switch {
-	case len(flagged) > 0:
-		sessions = strings.Join(flagged, "\n           ")
-	case len(session.Detect()) > 0:
-		sessions = strings.Join(session.Detect(), "\n           ")
+	// The same precedence the indexing commands apply, so that this reports
+	// what would actually happen rather than a second opinion about it. A
+	// malformed settings file is shown rather than raised: it is the thing
+	// being diagnosed.
+	cfg, hadFile, cfgErr := config.Load()
+	dirs, from := chooseDirs(flagged, cfg)
+
+	sessions := strings.Join(dirs, "\n           ") + "  (" + from + ")"
+	if len(dirs) == 0 {
+		sessions = "none found; looked in\n           " +
+			strings.Join(session.Candidates(), "\n           ")
 	}
-	fmt.Printf("sessions   %s\nindex      %s\nextension  %s\nmodel      %s\n\n",
-		sessions, dbPath, paths.Extension, paths.Model)
+
+	settingsLine := config.Path()
+	switch {
+	case cfgErr != nil:
+		settingsLine += "  (unreadable: " + cfgErr.Error() + ")"
+	case !hadFile:
+		settingsLine += "  (not written yet)"
+	}
+
+	fmt.Printf("sessions   %s\nsettings   %s\nindex      %s\nextension  %s\nmodel      %s\n\n",
+		sessions, settingsLine, dbPath, paths.Extension, paths.Model)
 
 	if err := index.CheckFTS5(); err != nil {
 		fmt.Println("fts5       missing:", err)
@@ -484,31 +499,114 @@ func (d *dirList) Set(v string) error {
 	return nil
 }
 
-// sessionDirs is the directories to index: what --dir said, or whatever is on
-// the machine.
+// settings is the resolved configuration for one run.
+type settings struct {
+	dirs   []string
+	dbPath string
+	addr   string
+}
+
+// resolve applies the precedence: a flag beats the settings file, which beats
+// working it out.
 //
-// Detecting rather than defaulting to pi's directory is what lets spireweb be
-// run with no arguments at all. Telling someone to pass --dir before they can
-// see anything is how a tool goes uninstalled, and the answer is on disk.
+// Whether a flag was *given* is the question, not whether it differs from its
+// default, so this takes the set of flags fs actually saw. Otherwise --addr
+// with the default value would be indistinguishable from no --addr, and could
+// not override a config that says otherwise.
 //
-// Only cmd detects. index.Build still falls back to pi's directory when given
-// none, because it is a library and a test that indexes a fixture should not
-// depend on what the machine running it happens to have.
-func sessionDirs(flagged dirList) ([]string, error) {
-	if len(flagged) > 0 {
-		return flagged, nil
+// A first run with nothing configured writes down what it worked out. That is
+// the point of the file: detection answers "what is on this machine" afresh
+// every time, and the answer changes -- install pi to try it once and the
+// corpus silently doubles, move ~/.claude and the index empties with no
+// explanation. Written down, it is something a person can read and edit.
+func resolve(given map[string]bool, flagged dirList, dbPath, addr string) (settings, error) {
+	cfg, hadFile, err := config.Load()
+	if err != nil {
+		// Named rather than ignored: falling back to detection would quietly
+		// disregard what someone wrote.
+		return settings{}, err
 	}
-	if dirs := session.Detect(); len(dirs) > 0 {
-		note("indexing %s", strings.Join(dirs, ", "))
-		return dirs, nil
+
+	s := settings{dbPath: dbPath, addr: addr}
+	if !given["db"] && cfg.Index != "" {
+		s.dbPath = cfg.Index
 	}
-	// Finding nothing is worth an error rather than an empty interface. Name
-	// everywhere that was looked, because the usual cause is sessions living
-	// somewhere this does not know about, and --dir is then the answer.
-	return nil, fmt.Errorf("no agent sessions found. Looked in:\n  %s\nUse --dir to name one",
-		strings.Join(session.Candidates(), "\n  "))
+	if !given["addr"] && cfg.Addr != "" {
+		s.addr = cfg.Addr
+	}
+
+	var from string
+	s.dirs, from = chooseDirs(flagged, cfg)
+	if len(s.dirs) == 0 {
+		// Finding nothing is worth an error rather than an empty interface.
+		// Name everywhere that was looked: the usual cause is sessions living
+		// somewhere this does not know about, and --dir is then the answer.
+		return settings{}, fmt.Errorf(
+			"no agent sessions found. Looked in:\n  %s\nUse --dir to name one",
+			strings.Join(session.Candidates(), "\n  "))
+	}
+
+	if from == sourceDetected && !hadFile {
+		cfg.Dirs = s.dirs
+		if cfg.Titles == "" {
+			cfg.Titles = config.TitlesOff
+		}
+		if err := cfg.Save(); err != nil {
+			// Not fatal: spireweb works perfectly well without being able to
+			// write its settings, it just works them out again next time.
+			note("could not write %s: %v", config.Path(), err)
+		} else {
+			note("found %s\nwrote %s", strings.Join(s.dirs, ", "), config.Path())
+		}
+	}
+	return s, nil
+}
+
+// Where a setting came from, for reporting.
+const (
+	sourceFlag     = "--dir"
+	sourceConfig   = "config"
+	sourceDetected = "detected"
+)
+
+// chooseDirs applies the precedence and says which rule won. Returns no
+// directories when there is nothing anywhere, which the caller turns into
+// either an error or a message, depending on whether it is about to index.
+func chooseDirs(flagged dirList, cfg config.Config) ([]string, string) {
+	switch {
+	case len(flagged) > 0:
+		return flagged, sourceFlag
+	case len(cfg.Dirs) > 0:
+		return cfg.Dirs, sourceConfig
+	default:
+		return session.Detect(), sourceDetected
+	}
+}
+
+// givenFlags reports which flags were actually passed, as opposed to left at
+// their default.
+func givenFlags(fs *flag.FlagSet) map[string]bool {
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	return given
 }
 
 func note(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "note: "+format+"\n", args...)
+}
+
+// configuredDB resolves only the index location, for the commands that read an
+// existing index and index nothing.
+//
+// They must not resolve directories: stats and doctor work on what is already
+// there, and info exists to explain a machine where nothing is set up. Making
+// any of them fail because no sessions were found would be backwards.
+func configuredDB(given map[string]bool, flagged string) string {
+	if given["db"] {
+		return flagged
+	}
+	if cfg, _, err := config.Load(); err == nil && cfg.Index != "" {
+		return cfg.Index
+	}
+	return flagged
 }
