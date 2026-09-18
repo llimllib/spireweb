@@ -23,8 +23,8 @@ import (
 )
 
 func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch bool, titlesVia string) error {
-	if _, err := os.Stat(dbPath); err != nil {
-		return fmt.Errorf("no index at %s; run 'spireweb index' first", dbPath)
+	if err := bootstrapIndex(dbPath); err != nil {
+		return err
 	}
 
 	// The server only reads. Semantic support is preferred because chunks_vec
@@ -101,6 +101,41 @@ func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch bo
 	}
 }
 
+// bootstrapIndex creates an empty index when there is none.
+//
+// The read pool below is _query_only, which cannot create a schema, so
+// something has to have made one first. That used to be an error telling the
+// reader to go and run 'spireweb index' -- accurate, and backwards: serve opens
+// a writer a few lines further down and runs a catch-up build through it, so it
+// already does the thing it was refusing to start without. The only reason it
+// could not bootstrap itself was the order the two handles were opened in.
+//
+// Creating it here rather than reordering so that startIndexer runs first:
+// --no-watch makes that function return immediately, and a scripted run against
+// a fresh index is exactly where that path is used.
+//
+// The lexical driver, whatever the server will use: this needs the schema and
+// nothing else, and opening a semantic connection would load a second copy of
+// the model -- 30MB, and fifteen seconds on a cold shader cache -- to run a few
+// CREATE TABLEs.
+func bootstrapIndex(dbPath string) error {
+	if _, err := os.Stat(dbPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	db, err := index.Open(dbPath, index.DriverName)
+	if err != nil {
+		return err
+	}
+	// Said rather than done silently: the first run comes up with an empty list
+	// and fills in behind the reader, and "no sessions" is alarming without a
+	// reason for it. The progress itself reaches the page through /status.
+	note("no index at %s; creating one and indexing in the background", dbPath)
+	return db.Close()
+}
+
 // startIndexer opens a writer and keeps the index current in the background.
 //
 // Failure here is not fatal. The server's job is to show what is already
@@ -129,6 +164,11 @@ func startIndexer(ctx context.Context, dbPath, driver string, dirs []string, noW
 	opts := index.BuildOptions{Dirs: dirs}
 	if driver == index.SemanticDriverName {
 		if e, err := embed.New(writer.SQL(), embed.DefaultPaths()); err != nil {
+			note("new sessions will be indexed without embeddings: %v", err)
+		} else if err := writer.EnsureVectorTable(e.Dim()); err != nil {
+			// An index built by 'spireweb index' already has this table, which
+			// is why nothing missed it -- but serve can now be the first thing
+			// to touch a new index, and then there is nowhere to put a vector.
 			note("new sessions will be indexed without embeddings: %v", err)
 		} else {
 			opts.Embedder = e
