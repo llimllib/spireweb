@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/llimllib/spireweb/internal/config"
 	"github.com/llimllib/spireweb/internal/embed"
 	"github.com/llimllib/spireweb/internal/index"
 	"github.com/llimllib/spireweb/internal/indexer"
@@ -21,7 +22,7 @@ import (
 	"github.com/llimllib/spireweb/internal/web"
 )
 
-func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch, noTitles bool, titleVia string) error {
+func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch bool, titlesVia string) error {
 	if _, err := os.Stat(dbPath); err != nil {
 		return fmt.Errorf("no index at %s; run 'spireweb index' first", dbPath)
 	}
@@ -55,7 +56,7 @@ func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch, n
 	// A writer, separate from the read pool above. WAL lets handlers read a
 	// consistent snapshot while this one indexes, so a reindex triggered by a
 	// conversation in another terminal never blocks a request.
-	live, closeLive := startIndexer(ctx, dbPath, driver, dirs, noWatch, noTitles, titleVia)
+	live, closeLive := startIndexer(ctx, dbPath, driver, dirs, noWatch, titlesVia)
 	if closeLive != nil {
 		defer closeLive()
 	}
@@ -103,7 +104,7 @@ func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch, n
 // Failure here is not fatal. The server's job is to show what is already
 // indexed, and a second spireweb holding the write lock, or a read-only
 // filesystem, should cost live updates rather than the whole interface.
-func startIndexer(ctx context.Context, dbPath, driver string, dirs []string, noWatch, noTitles bool, titleVia string) (web.StatusSource, func()) {
+func startIndexer(ctx context.Context, dbPath, driver string, dirs []string, noWatch bool, titlesVia string) (web.StatusSource, func()) {
 	if noWatch {
 		return nil, nil
 	}
@@ -135,8 +136,8 @@ func startIndexer(ctx context.Context, dbPath, driver string, dirs []string, noW
 	// Titles fill in behind the list while it is being browsed, which is the
 	// point of them being a separate pass: nothing waits on a network call.
 	var titleOpts titles.Options
-	if !noTitles {
-		if s, err := summarizer(titleVia); err != nil {
+	if titlesVia != config.TitlesOff {
+		if s, err := summarizer(titlesVia); err != nil {
 			note("titles disabled: %v", err)
 		} else {
 			titleOpts.Summarizer = s

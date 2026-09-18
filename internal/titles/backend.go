@@ -26,8 +26,15 @@ func NewSummarizer(backend string) (Summarizer, error) {
 	case "", BackendAPI:
 		s, err := NewAnthropic()
 		if err != nil {
-			return nil, fmt.Errorf("%w (or use --titles-via=claude to use the Claude Code CLI "+
-				"and your subscription)", err)
+			// Name what the alternative costs, not just that it exists. Someone
+			// without an API key is usually a Claude Code user, for whom
+			// "claude" is the right answer -- but it spends the rate limit
+			// their interactive sessions share, and finding that out afterwards
+			// is the wrong order.
+			return nil, fmt.Errorf("%w.\n"+
+				"  --titles-via=claude uses the Claude Code CLI instead, which bills the\n"+
+				"  subscription it is signed in to and shares its rate limit with your\n"+
+				"  interactive sessions. --titles N caps a run, for trying it out", err)
 		}
 		return s, nil
 	case BackendClaude:

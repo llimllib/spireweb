@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -43,10 +44,11 @@ flags:
   --dev          reload templates and static files from disk per request
   --open         open a browser once the server is listening
   --no-watch     do not index in the background while serving
-  --no-titles    do not generate session titles with an LLM
+  --no-titles    do not generate session titles (same as titles = "off")
   --titles N     stop after generating N titles (0 for no limit)
   --titles-via   api (ANTHROPIC_API_KEY) or claude (the Claude Code CLI,
-                 which bills a Pro/Max subscription rather than the API)
+                 which bills a Pro/Max subscription rather than the API).
+                 Defaults to the settings file's titles value.
 `
 
 func main() {
@@ -66,7 +68,7 @@ func main() {
 	dev := fs.Bool("dev", false, "reload templates and static files from disk")
 	openBrowser := fs.Bool("open", false, "open a browser once listening")
 	noWatch := fs.Bool("no-watch", false, "do not index in the background")
-	noTitles := fs.Bool("no-titles", false, "do not generate session titles")
+	_ = fs.Bool("no-titles", false, "do not generate session titles") // read via givenFlags
 	// Titling the whole corpus costs real money. A limit makes a trial run
 	// possible -- newest sessions first, so it titles what is worth looking at
 	// -- before committing to all eleven hundred.
@@ -78,17 +80,17 @@ func main() {
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr); serr != nil {
+		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr, *titleVia); serr != nil {
 			err = serr
 		} else {
-			err = runServe(s.dbPath, s.addr, s.dirs, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
+			err = runServe(s.dbPath, s.addr, s.dirs, *dev, *openBrowser, *noWatch, s.titles)
 		}
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr); serr != nil {
+		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr, *titleVia); serr != nil {
 			err = serr
 		} else {
-			err = runIndex(s.dbPath, s.dirs, *full, *lexical, *noTitles, *titleLimit, *titleVia)
+			err = runIndex(s.dbPath, s.dirs, *full, *lexical, *titleLimit, s.titles)
 		}
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
@@ -172,7 +174,7 @@ func openIndex(path string, lexical bool) (*index.DB, index.Embedder, error) {
 	return db, e, nil
 }
 
-func runIndex(dbPath string, dirs []string, full, lexical, noTitles bool, titleLimit int, titleVia string) error {
+func runIndex(dbPath string, dirs []string, full, lexical bool, titleLimit int, titlesVia string) error {
 	db, embedder, err := openIndex(dbPath, lexical)
 	if err != nil {
 		return err
@@ -237,15 +239,70 @@ func runIndex(dbPath string, dirs []string, full, lexical, noTitles bool, titleL
 		note("built without embeddings; search will be keyword-only")
 	}
 
-	if noTitles {
+	if titlesVia == config.TitlesOff {
 		return nil
 	}
-	return runTitles(ctx, db, titleLimit, titleVia)
+	return runTitles(ctx, db, titleLimit, titlesVia)
 }
 
 // summarizer builds the title generator for the chosen backend.
 func summarizer(via string) (titles.Summarizer, error) {
 	return titles.NewSummarizer(via)
+}
+
+// confirmThreshold is how many sessions make a CLI run worth asking about.
+// Below it the pass is quick and cheap enough that a prompt is just friction.
+const confirmThreshold = 50
+
+// confirmCLIRun asks before titling a large corpus through the Claude CLI.
+//
+// Only for that backend, and only when a person is there to answer. Using the
+// API means someone deliberately set ANTHROPIC_API_KEY, which is its own
+// opt-in; the CLI spends a subscription's rate limit, shared with the
+// interactive sessions it is actually for, and AGENTS.md's rule against an
+// "auto" backend is the same concern one step earlier.
+//
+// Not a tty means proceed: the backend was named on the command line or in the
+// settings file, and a prompt nobody can answer would hang a cron job or a
+// brew service rather than protect anyone.
+func confirmCLIRun(ctx context.Context, db *index.DB, via string, limit int) (bool, error) {
+	if via != titles.BackendClaude || !isTerminal(os.Stdin) {
+		return true, nil
+	}
+	cands, err := db.TitleCandidates(ctx)
+	if err != nil {
+		return false, err
+	}
+	n := len(cands)
+	if limit > 0 && limit < n {
+		n = limit
+	}
+	if n < confirmThreshold {
+		return true, nil
+	}
+
+	// "Up to", because a session whose conversation has not moved much since
+	// it was last titled is answered from title_key without a call.
+	fmt.Printf("%d sessions to title through the claude CLI: up to %d calls against your\n"+
+		"subscription's rate limit, roughly %s. Continue? [y/N] ",
+		n, n, (time.Duration(n) * 4500 * time.Millisecond / time.Duration(titles.CLIConcurrency)).Round(time.Minute))
+
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	}
+	return false, nil
+}
+
+// isTerminal reports whether f is a terminal, so that prompts are only asked
+// where they can be answered.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // runTitles generates titles for sessions that do not have one.
@@ -258,6 +315,12 @@ func runTitles(ctx context.Context, db *index.DB, limit int, via string) error {
 	s, err := summarizer(via)
 	if err != nil {
 		note("skipping titles: %v", err)
+		return nil
+	}
+	if ok, err := confirmCLIRun(ctx, db, via, limit); err != nil {
+		return err
+	} else if !ok {
+		note("skipping titles; set titles in %s to choose once", config.Path())
 		return nil
 	}
 
@@ -504,6 +567,10 @@ type settings struct {
 	dirs   []string
 	dbPath string
 	addr   string
+
+	// titles is a config.Titles* value. Off is spelled out rather than left
+	// absent, because "decided not to" and "has not been asked" differ.
+	titles string
 }
 
 // resolve applies the precedence: a flag beats the settings file, which beats
@@ -519,7 +586,7 @@ type settings struct {
 // every time, and the answer changes -- install pi to try it once and the
 // corpus silently doubles, move ~/.claude and the index empties with no
 // explanation. Written down, it is something a person can read and edit.
-func resolve(given map[string]bool, flagged dirList, dbPath, addr string) (settings, error) {
+func resolve(given map[string]bool, flagged dirList, dbPath, addr, titleVia string) (settings, error) {
 	cfg, hadFile, err := config.Load()
 	if err != nil {
 		// Named rather than ignored: falling back to detection would quietly
@@ -533,6 +600,17 @@ func resolve(given map[string]bool, flagged dirList, dbPath, addr string) (setti
 	}
 	if !given["addr"] && cfg.Addr != "" {
 		s.addr = cfg.Addr
+	}
+
+	switch {
+	case given["no-titles"]:
+		s.titles = config.TitlesOff
+	case given["titles-via"]:
+		s.titles = titleVia
+	case cfg.Titles != "":
+		s.titles = cfg.Titles
+	default:
+		s.titles = config.TitlesAPI
 	}
 
 	var from string
@@ -549,7 +627,12 @@ func resolve(given map[string]bool, flagged dirList, dbPath, addr string) (setti
 	if from == sourceDetected && !hadFile {
 		cfg.Dirs = s.dirs
 		if cfg.Titles == "" {
-			cfg.Titles = config.TitlesOff
+			// What spireweb does today, written down rather than changed. A
+			// first run must not quietly turn titles off for someone who has
+			// ANTHROPIC_API_KEY set and has been getting them all along; the
+			// comments in the file are what tell a Claude Code user that
+			// "claude" is the setting for them.
+			cfg.Titles = config.TitlesAPI
 		}
 		if err := cfg.Save(); err != nil {
 			// Not fatal: spireweb works perfectly well without being able to
