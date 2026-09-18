@@ -492,6 +492,22 @@ load, because the warm case is overwhelmingly common. Removing the cost rather
 than narrating it means building with the flag off and shipping a precompiled
 `.metallib` -- unmeasured, and it trades away the single-file property.
 
+## Commits
+
+A subject line says what changed, not how much of it: "Archive every message in
+the database", not "Record three things this milestone cost an hour" -- which is
+an actual commit here, and names neither the file it touched nor any of the
+three things.
+
+The long-standing style is a capitalized sentence in the imperative. The eight
+commits of the Claude Code milestone add a `scope:` prefix -- `storage:`,
+`render:`, `infra:` -- which is the more recent answer and worth following where
+a change belongs to one area.
+
+Bodies carry the reasoning, at length, and are most of the value: the same
+argument usually ends up in a comment or in this file, and the commit is where
+it gets written first.
+
 ## Changing GitHub Actions
 
 Run `aver` after editing a workflow; it reports outdated action versions.
