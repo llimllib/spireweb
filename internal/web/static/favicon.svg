@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!--
+    An emoji rather than a drawing: it is one character to change, it needs no
+    binary asset, and at 16px the silhouette is all that survives anyway.
+
+    🗼 rather than 🏰 because a single narrow triangle stays legible at favicon
+    size where a cluster of turrets does not, and because it reads as a tower
+    rather than as a fairytale.
+
+    Rendered with the system emoji font, so this is a coloured glyph on every
+    platform that has one and a blank tab on one that does not. Acceptable for
+    a tool that runs on localhost.
+  -->
+  <text x="50" y="50" font-size="88" text-anchor="middle" dominant-baseline="central">🗼</text>
+</svg>

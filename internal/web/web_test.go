@@ -389,6 +389,7 @@ func TestStaticAssetsAreServed(t *testing.T) {
 	f := newFixture(t, map[string][]string{"aaa": {userMsg("hi")}})
 	for _, path := range []string{
 		"/static/app.css", "/static/app.js", "/static/htmx.min.js", "/static/chroma.css",
+		"/static/favicon.svg",
 	} {
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

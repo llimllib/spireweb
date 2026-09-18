@@ -97,3 +97,17 @@ func TestEmptyIndexOffersTheFix(t *testing.T) {
 		t.Errorf("empty state code = %q, want the command to run", got)
 	}
 }
+
+// The favicon is a link in the layout and a file in the embedded static
+// directory; either one alone is a blank tab.
+func TestLayoutLinksTheFavicon(t *testing.T) {
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("hi")}})
+	_, doc := f.get(t, "/")
+	sel := doc.Find(`link[rel="icon"]`)
+	if sel.Length() == 0 {
+		t.Fatal("no favicon link in the layout")
+	}
+	if href, _ := sel.Attr("href"); href != "/static/favicon.svg" {
+		t.Errorf("favicon href = %q", href)
+	}
+}
