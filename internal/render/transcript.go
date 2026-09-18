@@ -126,15 +126,39 @@ func Transcript(s *session.Session) []Entry {
 
 // summaryArg names the argument worth showing on a collapsed tool line, per
 // tool. "ls" tells you nothing; "ls /etc/nginx" tells you what happened.
+//
+// Keys are normalized names (see toolKey), and the values list both agents'
+// spellings in preference order: pi calls an edit's target "path", Claude Code
+// calls it "file_path".
 var summaryArg = map[string][]string{
-	"bash":  {"command"},
-	"read":  {"path"},
-	"write": {"path"},
-	"edit":  {"path"},
-	"grep":  {"pattern"},
-	"find":  {"pattern", "glob", "path"},
-	"fetch": {"url"},
-	"task":  {"description"},
+	"bash":     {"command"},
+	"read":     {"file_path", "path"},
+	"write":    {"file_path", "path"},
+	"edit":     {"file_path", "path"},
+	"grep":     {"pattern"},
+	"glob":     {"pattern", "glob"},
+	"find":     {"pattern", "glob", "path"},
+	"fetch":    {"url"},
+	"webfetch": {"url"},
+	"task":     {"description", "prompt"},
+}
+
+// toolKey normalizes a tool name for the lookup above.
+//
+// Two things vary. Claude Code capitalizes its built-ins (Bash, Edit), and
+// anything served over MCP arrives as mcp__<server>__<tool> -- which is most
+// of this corpus: 7556 of the ~11000 calls are mcp__custom-tools__bash.
+//
+// Stripping the server prefix means an MCP tool called bash is summarized like
+// the built-in one, which is right: it is a bash tool, and the summary is
+// about what the call did rather than who provided it.
+func toolKey(name string) string {
+	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
+		if i := strings.LastIndex(rest, "__"); i >= 0 {
+			name = rest[i+2:]
+		}
+	}
+	return strings.ToLower(name)
 }
 
 // ToolSummary renders the one-line description shown on a collapsed call.
@@ -152,7 +176,7 @@ func ToolSummary(name string, args json.RawMessage) string {
 		return ""
 	}
 
-	for _, key := range summaryArg[name] {
+	for _, key := range summaryArg[toolKey(name)] {
 		if v, ok := m[key].(string); ok && v != "" {
 			return collapse(v, 160)
 		}

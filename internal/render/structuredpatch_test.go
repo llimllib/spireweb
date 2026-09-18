@@ -208,3 +208,45 @@ func TestParseDiffIgnoresOtherClaudeToolResults(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code capitalizes its built-ins, and anything over MCP arrives as
+// mcp__<server>__<tool>. Without normalizing, every one of them fell through
+// to the "unknown tool" path, which picks the shortest string argument -- and
+// for Bash that is description rather than the command that ran.
+func TestToolSummaryHandlesClaudeToolNames(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+		args string
+		want string
+	}{
+		{"built-in bash", "Bash",
+			`{"command":"go test ./...","description":"Run tests"}`, "go test ./..."},
+		{"mcp bash", "mcp__custom-tools__bash",
+			`{"command":"rg -n TODO","timeout":30}`, "rg -n TODO"},
+		{"claude edit", "Edit",
+			`{"file_path":"/a/b.go","old_string":"x","new_string":"y"}`, "/a/b.go"},
+		{"claude grep", "mcp__custom-tools__grep",
+			`{"pattern":"needle","output_mode":"content"}`, "needle"},
+		{"pi is unchanged", "edit",
+			`{"path":"/a/b.go","edits":[]}`, "/a/b.go"},
+		{"pi bash is unchanged", "bash",
+			`{"command":"ls /etc"}`, "ls /etc"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ToolSummary(tc.tool, json.RawMessage(tc.args)); got != tc.want {
+				t.Errorf("ToolSummary(%q) = %q, want %q", tc.tool, got, tc.want)
+			}
+		})
+	}
+}
+
+// A tool nothing knows about still gets a useful line rather than a bare name.
+func TestToolSummaryStillFallsBackForUnknownTools(t *testing.T) {
+	got := ToolSummary("mcp__someserver__whatsit",
+		json.RawMessage(`{"body":"a very long piece of content here","id":"abc"}`))
+	if got != "abc" {
+		t.Errorf("ToolSummary = %q, want the shortest string argument", got)
+	}
+}
