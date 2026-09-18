@@ -34,7 +34,9 @@ func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch bo
 	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err == nil {
 		driver = index.SemanticDriverName
 	}
+	stop := noteSlowModelLoad()
 	db, err := index.OpenReader(dbPath, driver)
+	stop()
 	if err != nil && driver != index.DriverName {
 		note("semantic search unavailable: %v", err)
 		driver = index.DriverName

@@ -154,7 +154,9 @@ func openIndex(path string, lexical bool) (*index.DB, index.Embedder, error) {
 		note("index was written by a different schema version; rebuilding")
 	}
 
+	stop := noteSlowModelLoad()
 	e, err := embed.New(db.SQL(), paths)
+	stop()
 	if err != nil {
 		db.Close()
 		note("semantic search unavailable: %v", err)
@@ -554,7 +556,9 @@ func runInfo(dbPath string, flagged dirList) error {
 	}
 	// Opening is the only honest test: the files can be present and the backend
 	// still unable to load the model.
+	stop := noteSlowModelLoad()
 	probe, err := index.Open(dbPath, index.SemanticDriverName)
+	stop()
 	if err != nil {
 		fmt.Println("semantic   unavailable:", err)
 		return nil
@@ -712,4 +716,35 @@ func configuredDB(given map[string]bool, flagged string) string {
 		return cfg.Index
 	}
 	return flagged
+}
+
+// slowNote prints a message if whatever follows has not finished within d,
+// and returns the function that cancels it.
+//
+// For the one operation here that is slow without looking like it should be:
+// the first connection through the semantic driver makes llama.cpp compile its
+// Metal shaders, which takes about fifteen seconds. macOS caches the result,
+// so the next run is instant -- but the cache lives under /var/folders and is
+// evicted on the system's own schedule, so this is not a cost paid once.
+//
+// Printed only when it actually happens rather than before every load, because
+// the warm case is the overwhelmingly common one and a warning that is almost
+// always wrong is worse than no warning.
+func slowNote(d time.Duration, format string, args ...any) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+		case <-time.After(d):
+			note(format, args...)
+		}
+	}()
+	return func() { close(done) }
+}
+
+// noteSlowModelLoad is slowNote with the message this exists for.
+func noteSlowModelLoad() (stop func()) {
+	return slowNote(2*time.Second,
+		"loading the embedding model; llama.cpp is compiling Metal shaders, "+
+			"which takes about 15s the first time and is then cached")
 }

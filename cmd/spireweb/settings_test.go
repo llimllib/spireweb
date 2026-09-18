@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/llimllib/spireweb/internal/config"
 )
@@ -192,5 +195,52 @@ func TestResolveDoesNotWriteTheFileWhenDirWasGiven(t *testing.T) {
 	}
 	if _, had, _ := config.Load(); had {
 		t.Error("a --dir run wrote a settings file")
+	}
+}
+
+// A warning that is almost always wrong is worse than none, so the slow note
+// must stay silent when the thing it describes did not happen.
+func TestSlowNoteStaysQuietWhenFast(t *testing.T) {
+	stderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = stderr }()
+
+	stop := slowNote(time.Hour, "should never appear")
+	stop()
+	w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Errorf("slowNote printed %q before its deadline", out)
+	}
+}
+
+func TestSlowNoteSpeaksWhenSlow(t *testing.T) {
+	stderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = stderr }()
+
+	stop := slowNote(time.Millisecond, "the thing is slow")
+	time.Sleep(50 * time.Millisecond)
+	stop()
+	w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "the thing is slow") {
+		t.Errorf("slowNote printed %q, want the message", out)
 	}
 }
