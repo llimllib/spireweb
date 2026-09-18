@@ -250,6 +250,26 @@ func (w *Watcher) reindex(ctx context.Context, paths []string) (int, error) {
 			continue
 		}
 
+		// The same rule Build applies, and it has to be applied here too or the
+		// filter only holds for files that arrive between runs.
+		//
+		// This is the path that matters most for it. The titles pass shells out
+		// to `claude -p`, which writes a session into a directory that may be
+		// one of the watched ones -- so a server generating titles produces
+		// exactly the files this excludes, while it runs. Indexing one makes it
+		// a candidate for titling, which writes another.
+		//
+		// Deleted rather than skipped: Build leaves that to its sweep over
+		// everything it did not see, and the watcher has no such sweep. Doing it
+		// here also means a file indexed before the rule reached it is cleaned
+		// up the next time it changes, rather than waiting for --full.
+		if session.SkipReason(p) != "" {
+			if err := w.db.deleteByPath(p); err != nil {
+				return chunks, err
+			}
+			continue
+		}
+
 		// WithRaw so that live indexing archives too; a session written while
 		// the server runs must not be the one session missing from the archive.
 		s, err := session.ParseWithRaw(p)

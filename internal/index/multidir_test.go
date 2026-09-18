@@ -180,3 +180,79 @@ func TestWatcherCatchesASessionWrittenWithItsDirectory(t *testing.T) {
 		return indexedIDs(t, db)["new-1"]
 	})
 }
+
+// Build's filter is not enough on its own: the watcher reindexes changed files
+// directly, and that is the path a title prompt arrives by. The titles pass
+// shells out to `claude -p` while the server runs, writing a session into a
+// watched directory -- so a server generating titles produces exactly the files
+// this excludes, and indexing one makes it a candidate for titling.
+func TestWatcherExcludesSDKSessions(t *testing.T) {
+	root := t.TempDir()
+	installSession(t, filepath.Join(root, "seed"), "seed-1", "already here")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(wctx, nil)
+
+	// What `claude -p` leaves behind, and a real session alongside it.
+	writeClaudeSession(t, root, "titler", "sdk-cli", "You write short titles")
+	writeClaudeSession(t, root, "real", "cli", "an actual conversation")
+
+	waitFor(t, 10*time.Second, "the interactive session to be indexed", func() bool {
+		return indexedIDs(t, db)["real"]
+	})
+	// A further settle before asserting the absence. The two files may not
+	// land in the same batch, and "not indexed yet" would otherwise pass for
+	// the same reason "never indexed" does.
+	time.Sleep(2 * WatchSettle)
+	if indexedIDs(t, db)["titler"] {
+		t.Error("the watcher indexed a title prompt; Build's filter does not cover this path")
+	}
+}
+
+// A file indexed before the rule reached it is dropped the next time it
+// changes, rather than surviving until --full.
+func TestWatcherDropsASessionThatBecomesExcluded(t *testing.T) {
+	root := t.TempDir()
+	p := writeClaudeSession(t, root, "leaked", "cli", "indexed before the rule")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	if !indexedIDs(t, db)["leaked"] {
+		t.Fatal("setup: not indexed")
+	}
+
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(wctx, nil)
+
+	line := `{"type":"user","sessionId":"leaked","timestamp":"2026-09-11T13:35:05Z",` +
+		`"cwd":"/Users/me/code/proj","entrypoint":"sdk-cli",` +
+		`"message":{"role":"user","content":[{"type":"text","text":"now an sdk session"}]}}`
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 10*time.Second, "the now-excluded session to be dropped", func() bool {
+		return !indexedIDs(t, db)["leaked"]
+	})
+}
