@@ -235,6 +235,13 @@ built before the table existed is backfilled by promoting the run to a full
 pass, exactly as `needsVectors` does, because mtime and size will never change
 again on an old session.
 
+`index --full` is cheaper than it sounds and costs nothing in money. The
+session upsert's `DO UPDATE` list omits `title`, `title_msgs` and `title_key`,
+and `TitleCandidates` keys on `title_msgs <> n_msgs` -- so a reindex of an
+unchanged file re-titles nothing. `reusableChunks` matches on chunk *content*,
+not on mtime, so unchanged chunks keep their row ids and their vectors and
+nothing is re-embedded. `--full` only bypasses the mtime skip.
+
 After changing anything about indexing, both of these must return 0:
 
 ```sql
@@ -257,6 +264,15 @@ A new project directory gets a watch **and a sweep of what is already in it**.
 Creating the directory and writing the first session into it are two operations
 milliseconds apart, so the session that caused the directory to appear is
 exactly the one the watch would miss.
+
+**`Build` and `Watcher.reindex` are two paths over the same decision.** The
+watcher does not call `Build`; it parses and upserts the changed files itself.
+So any rule about *which* sessions get indexed has to be written twice, and the
+watcher is the path that matters more -- it is the one running while an agent
+writes. The SDK filter shipped in `Build` alone and leaked 16 rows into a live
+index within a day, because the titles pass writes the very files it excludes
+*while the server is up*. They share `upsertSession`, so anything about how a
+session is indexed is safe; anything about whether it is indexed is not.
 
 The header polls `/status`, which **replaces itself**, so the server picks the
 next interval (2s busy, 10s idle) rather than the page choosing once at load.
@@ -400,6 +416,11 @@ semantic test loads the model. The other five packages total under 2s.
 
 Semantic tests skip when the backend cannot actually run, not when its files
 are missing -- see the GPU note above.
+
+A watcher test asserting a file was **not** indexed has to wait out a second
+settle first. "Not indexed yet" and "never indexed" look identical, so an
+assertion made immediately after some other file appears passes whether or not
+the code works -- one did, once, before the sleep was added.
 
 ## Browser tests
 
