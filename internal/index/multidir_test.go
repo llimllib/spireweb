@@ -2,11 +2,27 @@ package index
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/llimllib/spireweb/internal/session"
 )
+
+// installSession writes a one-message pi session into dir/<id>.jsonl.
+func installSession(t *testing.T, dir, id, text string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Replace(strings.Replace(hdr, "%s", id, 1), "%s", "proj", 1)
+	body := head + "\n" + userMsg(text) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // The reason Dirs is a slice rather than Build being called once per directory:
 // Build removes every indexed session it did not see, so a build per root would
@@ -130,5 +146,37 @@ func TestWatcherWatchesEveryRoot(t *testing.T) {
 
 	waitFor(t, 10*time.Second, "a session in the second root to be indexed", func() bool {
 		return indexedIDs(t, db)["cc-late"]
+	})
+}
+
+// The race #58 describes: creating a project directory and writing the first
+// session into it are two operations, and the write can land before the watch
+// on the new directory exists. Without the sweep in noteExisting, the session
+// that created the directory is the one that goes missing.
+func TestWatcherCatchesASessionWrittenWithItsDirectory(t *testing.T) {
+	root := t.TempDir()
+	installSession(t, filepath.Join(root, "seed"), "seed-1", "already here")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(wctx, nil)
+
+	// Directory and file together, with nothing in between, which is what an
+	// agent starting a session in a new project does.
+	installSession(t, filepath.Join(root, "brand-new"), "new-1", "the first session here")
+
+	waitFor(t, 10*time.Second, "a session written with its directory to be indexed", func() bool {
+		return indexedIDs(t, db)["new-1"]
 	})
 }

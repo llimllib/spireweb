@@ -165,11 +165,17 @@ func (w *Watcher) Run(ctx context.Context, onEvent func(WatchEvent)) error {
 // note records a relevant event and reports whether it should trigger a
 // reindex.
 func (w *Watcher) note(ev fsnotify.Event) bool {
-	// A new project directory means a new pi session; start watching it.
+	// A new project directory means a new session; start watching it.
 	if ev.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
 		if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
 			_ = w.fs.Add(ev.Name)
-			return false
+			// Adding the watch is not enough. Creating the directory and
+			// writing the first session file into it are two operations
+			// milliseconds apart, and the write can land before the watch
+			// above exists -- so the session that created the directory is
+			// exactly the one at risk of being missed, and stays invisible
+			// until the next catch-up build. Sweep what is already there.
+			return w.noteExisting(ev.Name)
 		}
 	}
 	if !strings.HasSuffix(ev.Name, ".jsonl") {
@@ -184,6 +190,28 @@ func (w *Watcher) note(ev fsnotify.Event) bool {
 	w.pending[ev.Name] = true
 	w.mu.Unlock()
 	return true
+}
+
+// noteExisting queues every session file already in dir, and reports whether
+// it found any. One ReadDir per new project directory, and a file found this
+// way collapses into the same reindex as an event for it would, because both
+// go into pending behind the settle timer.
+func (w *Watcher) noteExisting(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	found := false
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		w.pending[filepath.Join(dir, e.Name())] = true
+		found = true
+	}
+	return found
 }
 
 func (w *Watcher) drain() []string {
