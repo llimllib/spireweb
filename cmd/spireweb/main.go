@@ -412,12 +412,28 @@ func runDoctor(dbPath string) error {
 	// The extension is needed to read chunks_vec at all, but an index built
 	// without embeddings has no such table and is still worth checking.
 	driver := index.DriverName
+	semantic := false
 	if err := index.RegisterSemanticDriver(embed.DefaultPaths()); err == nil {
-		driver = index.SemanticDriverName
+		driver, semantic = index.SemanticDriverName, true
 	} else {
 		note("extension unavailable, skipping vector checks: %v", err)
 	}
+
 	db, err := index.OpenReader(dbPath, driver)
+	if err != nil && semantic {
+		// Registering the driver only proves the files are on disk. Opening a
+		// connection is where llama.cpp actually loads the model, and it fails
+		// on a machine with no reachable GPU -- a sandbox, a headless runner,
+		// someone's laptop with a broken install.
+		//
+		// Falling back rather than returning, which is what this did and what
+		// made doctor the one command that refused to run. It is the command
+		// someone reaches for *because* something is wrong, so it has to check
+		// what it can and say what it could not.
+		note("semantic search unavailable, skipping vector checks: %v", err)
+		semantic = false
+		db, err = index.OpenReader(dbPath, index.DriverName)
+	}
 	if err != nil {
 		return err
 	}
@@ -432,7 +448,11 @@ func runDoctor(dbPath string) error {
 			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n)
 		return n > 0
 	}
-	hasVec, hasMessages := has("chunks_vec"), has("messages")
+	// chunks_vec is a vec0 virtual table: it appears in sqlite_master whether or
+	// not the extension is loaded, but querying it without one errors. So the
+	// checks need both that the table exists and that this connection can read
+	// it.
+	hasVec, hasMessages := semantic && has("chunks_vec"), has("messages")
 	if !hasMessages {
 		note("no message archive in this index; run 'spireweb index' to build one")
 	}
