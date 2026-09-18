@@ -91,6 +91,96 @@ honest test of "is semantic search working" is opening a connection.
   opening a pool leaves later connections modelless, and the symptom is silent:
   the ranker errors, gets skipped, and search degrades to keyword-only.
 
+## Two session formats
+
+`internal/session` parses pi's files and Claude Code's, told apart by the first
+line: pi opens with a `{"type":"session"}` header, Claude Code has no header at
+all. Detection is **per file**, not per directory, so one `--dir` may hold
+either. Everything downstream consumes `*Session` and never sees bytes, which
+is what keeps the difference to that one package.
+
+Claude Code's shape differs in ways that are not a remapping:
+
+- **Tool results have no role.** They are `user` records carrying `tool_result`
+  blocks, and one record may carry several -- that is what parallel tool calls
+  look like coming back. `Message.ToolCallID` is singular, so one record fans
+  out into N messages, or `ToolResults()` finds one call's output and the rest
+  render as missing.
+- **Every fanned-out message carries the same `Raw`.** `archiveMessages` uses
+  `COUNT(*)` as its resume point, so a message with no `Raw` leaves a gap that
+  makes the count disagree with the message list on every later build.
+- **`Raw` is the whole record**, unlike pi's, where it is the message.
+  `toolUseResult` sits on the envelope and holds the `structuredPatch` an edit
+  produced, so keeping only the message would make the archive lossy in exactly
+  the way it exists to prevent.
+- `message.content` is a bare string on older records, an array on newer ones.
+- One assistant turn spans several records, so `n_msgs` is not comparable
+  between agents.
+
+`render.ParseDiff` takes either: pi's rendered `details.diff`, whose line
+numbers are parsed back out of the text, or Claude Code's `structuredPatch`,
+whose numbers come from walking the hunk. Tool names are normalized before the
+`summaryArg` lookup -- Claude Code capitalizes its built-ins, and MCP tools
+arrive as `mcp__<server>__<tool>`.
+
+## SDK sessions are excluded
+
+Claude Code writes a session file for **every SDK invocation**, not just for
+what a person types. On the corpus that was 1600 of 1617 files and 283 of
+284MB:
+
+| entrypoint | files | what it is |
+| --- | --- | --- |
+| `sdk-cli` in `spireweb-titles-*` | 1215 | spireweb's own title prompts |
+| any `sdk-ts` | 252 | pi tunnelling through claude-bridge |
+| `cli` | **17** | someone typing |
+
+The bridge files duplicate the pi corpus, with the worse copy. The title files
+are a **feedback loop**: the titles pass shells out to `claude -p`, which writes
+a session into the directory being indexed, which gets indexed and titled, which
+writes another.
+
+`session.SkipReason` filters on `entrypoint`, which is present on every
+message-bearing record across every version seen. **Whole file, not a prefix**:
+94 bridge sessions open with one or two `cli` records before the bridge takes
+over, the deepest at record 429. Matched as bytes rather than parsed, because
+it runs over every candidate on a cold build.
+
+It is checked in `Build` *after* the mtime test, so an unchanged indexed session
+still costs a stat. The consequence is that a session indexed before it became
+excluded survives until `--full`; excluded files are deliberately not marked
+`seen`, so the deletion sweep is what removes them.
+
+## Directories and config
+
+`BuildOptions.Dirs` is a slice. It cannot be one `Build` per directory:
+`build.go` removes every indexed session it did not see, so two builds would
+have each root's sweep delete the other's. `Discover` takes them all and
+returns one deduplicated list.
+
+With no `--dir`, `cmd` probes `$CLAUDE_CONFIG_DIR/projects`,
+`~/.config/claude/projects`, `~/.claude/projects`, `~/.pi/agent/sessions` and
+keeps those holding at least one `.jsonl`. Existence is not the test:
+`~/.claude` survives as a home for settings after `CLAUDE_CONFIG_DIR` has moved
+everything else. The candidates are deduplicated because they genuinely
+overlap -- `CLAUDE_CONFIG_DIR` is usually `~/.config/claude`.
+
+`index.Build` still falls back to pi's directory alone. Only `cmd` detects,
+because a test indexing a fixture must not depend on the machine running it.
+
+Precedence is flag, then `~/.config/spireweb/config.toml`, then detection, and
+**"was the flag given"** is the question rather than "does it differ from its
+default" -- otherwise `--addr` with the default value could not override a file.
+`resolve` is handed the set of flags the FlagSet saw.
+
+A first run writes down what it detected, because detection's answer moves:
+install pi to try it once and the corpus doubles. It records `titles = "api"`,
+which is what spireweb already did -- writing `off` would quietly stop titling
+for someone who has a key and has been getting them.
+
+XDG, not `~/Library/Application Support`, matching `SPIREWEB_DATA_DIR` and
+`embed.DefaultPaths`.
+
 ## Data
 
 - `chunks.id` is `AUTOINCREMENT`. A plain `INTEGER PRIMARY KEY` reuses rowids
@@ -112,8 +202,8 @@ honest test of "is semantic search working" is opening a connection.
 
 ## The archive
 
-`messages` holds every message of every session as pi wrote it, and is the one
-table that is not derived from something else: chunks, vectors, and titles can
+`messages` holds every message of every session as its agent wrote it, and is
+the one table that is not derived from something else: chunks, vectors, and titles can
 all be rebuilt from it, and it cannot be rebuilt from them. `spireweb doctor`
 checks it separately for that reason.
 
@@ -162,6 +252,11 @@ write, through one connection, and overlapping them is the same-connection
 case above.
 
 Events are coalesced after a 2s lull, because pi writes once per message.
+
+A new project directory gets a watch **and a sweep of what is already in it**.
+Creating the directory and writing the first session into it are two operations
+milliseconds apart, so the session that caused the directory to appear is
+exactly the one the watch would miss.
 
 The header polls `/status`, which **replaces itself**, so the server picks the
 next interval (2s busy, 10s idle) rather than the page choosing once at load.
@@ -330,6 +425,52 @@ These tests are only worth their weight if they fail when the behaviour breaks,
 which is worth re-checking after editing them: disabling `scrollToMatch()` and
 renaming the `j` case both produce failures.
 
+## Releasing
+
+`mise run release`, from a `v*` tag, through goreleaser. **darwin/arm64 only**:
+go-sqlite3, the sqlite-vec bindings and FTS5 all need cgo, so the
+`CGO_ENABLED=0` cross-compilation other repositories here use is not available.
+Restricting to one architecture removes the problem instead -- a macOS runner is
+already arm64.
+
+The entry point is `mise run release` and not bare `goreleaser`, because
+`CGO_CFLAGS` comes from `mise.toml`'s `[env]`. A preflight hook fails the build
+without it rather than compiling against whichever `sqlite3.h` the machine has.
+`before` hooks also run `sqlite-header` and `ts`; a missing `app.js` is embedded
+silently and ships the previous release's keyboard handling.
+
+The archive carries `lembed0.dylib` and the model beside the binary, and
+`embed.DefaultPaths` resolves the running executable and looks in its own
+directory. That is what makes both an unpacked tarball and the cask work:
+Homebrew puts only `spireweb` on PATH and leaves the rest in the Caskroom, so
+resolving *through* the symlink is what finds them.
+
+**Homebrew quarantines cask artifacts by default** -- that is what
+`--no-quarantine` overrides -- and nothing shipped is signed by a Developer ID.
+Both files are refused, and differently: the binary dies with `Killed: 9` behind
+an "Apple could not verify" dialog, while the dylib fails `dlopen` and SQLite
+retries with the suffix appended, so the error names `lembed0.dylib.dylib` and
+says "no such file" about a file that is right there. The result is a working
+spireweb with semantic search silently gone. The `postflight_steps` + `xattr -dr`
+in `.goreleaser.yaml` clears both; notarization would be the real fix.
+
+Pushing the cask needs `HOMEBREW_TAP_TOKEN`, a PAT secret on this repo.
+`GITHUB_TOKEN` cannot push to the tap.
+
+## Metal shaders
+
+The first connection through the semantic driver makes llama.cpp compile its
+Metal shaders: **about 15 seconds**, and it is not paid once. macOS caches the
+result under `/var/folders/.../C/com.apple.metal` and evicts it on its own
+schedule; there were three generations a week apart on one machine. It is
+caused by `-DGGML_METAL_EMBED_LIBRARY=ON`, which is also what makes the dylib
+relocatable and therefore shippable.
+
+`noteSlowModelLoad` says so after a two second grace rather than before every
+load, because the warm case is overwhelmingly common. Removing the cost rather
+than narrating it means building with the flag off and shipping a precompiled
+`.metallib` -- unmeasured, and it trades away the single-file property.
+
 ## Changing GitHub Actions
 
 Run `aver` after editing a workflow; it reports outdated action versions.
@@ -337,6 +478,13 @@ Run `aver` after editing a workflow; it reports outdated action versions.
 
 ## Corpus
 
-1128 files, 258MB, median 95KB, p90 567KB, max 7.2MB; 46k chunks. Useful for
-judging whether an approach scales. Lexical index build: ~4s cold, ~55ms when
-one session changed.
+**pi**: 1190 files, 258MB, median 95KB, p90 567KB, max 7.2MB; 48k chunks.
+Lexical index build ~9.5s cold with the archive, ~55ms when one session
+changed. Useful for judging whether an approach scales.
+
+**Claude Code**: 1617 files, 284MB -- but only **17 files and 1MB** of it is
+conversation this repository does not already have. The rest is excluded as SDK
+output, so it is worthless for judging scale and actively misleading for judging
+quality. Almost everything done through Claude Code on this machine arrives via
+claude-bridge and is therefore a duplicate of a pi session. Anything that needs
+a real Claude Code corpus needs someone else's.
