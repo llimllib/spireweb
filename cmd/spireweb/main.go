@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -33,7 +34,7 @@ usage:
 
 flags:
   --db PATH      index location (default %s)
-  --dir PATH     session directory (default %s)
+  --dir PATH     session directory, repeatable (default %s)
   --full         reindex everything rather than what changed
   --lexical      skip semantic indexing, even if the model is installed
   --addr ADDR    serve on this address (default 127.0.0.1:8080)
@@ -55,7 +56,8 @@ func main() {
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	dbPath := fs.String("db", index.DefaultPath(), "index location")
-	dir := fs.String("dir", session.DefaultDir(), "session directory")
+	var dirs dirList
+	fs.Var(&dirs, "dir", "session directory (repeatable)")
 	full := fs.Bool("full", false, "reindex everything")
 	lexical := fs.Bool("lexical", false, "skip semantic indexing")
 	addr := fs.String("addr", "127.0.0.1:8080", "listen address")
@@ -74,10 +76,10 @@ func main() {
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		err = runServe(*dbPath, *addr, *dir, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
+		err = runServe(*dbPath, *addr, sessionDirs(dirs), *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		err = runIndex(*dbPath, *dir, *full, *lexical, *noTitles, *titleLimit, *titleVia)
+		err = runIndex(*dbPath, sessionDirs(dirs), *full, *lexical, *noTitles, *titleLimit, *titleVia)
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
 		err = runStats(*dbPath)
@@ -86,7 +88,7 @@ func main() {
 		err = runDoctor(*dbPath)
 	case "info":
 		_ = fs.Parse(os.Args[2:])
-		err = runInfo(*dbPath, *dir)
+		err = runInfo(*dbPath, sessionDirs(dirs))
 	case "version":
 		fmt.Println("spireweb", Version)
 	default:
@@ -160,7 +162,7 @@ func openIndex(path string, lexical bool) (*index.DB, index.Embedder, error) {
 	return db, e, nil
 }
 
-func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int, titleVia string) error {
+func runIndex(dbPath string, dirs []string, full, lexical, noTitles bool, titleLimit int, titleVia string) error {
 	db, embedder, err := openIndex(dbPath, lexical)
 	if err != nil {
 		return err
@@ -174,7 +176,7 @@ func runIndex(dbPath, dir string, full, lexical, noTitles bool, titleLimit int, 
 	var lastReport time.Time
 	var announcedBackfill, announcedArchive bool
 	p, err := index.Build(ctx, db, index.BuildOptions{
-		Dir:      dir,
+		Dirs:     dirs,
 		Full:     full,
 		Embedder: embedder,
 		OnProgress: func(p index.Progress) {
@@ -412,11 +414,11 @@ func runDoctor(dbPath string) error {
 	return nil
 }
 
-func runInfo(dbPath, dir string) error {
+func runInfo(dbPath string, dirs []string) error {
 	paths := embed.DefaultPaths()
 	fmt.Printf("spireweb %s (%s %s/%s)\n\n", Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("sessions   %s\nindex      %s\nextension  %s\nmodel      %s\n\n",
-		dir, dbPath, paths.Extension, paths.Model)
+		strings.Join(dirs, "\n           "), dbPath, paths.Extension, paths.Model)
 
 	if err := index.CheckFTS5(); err != nil {
 		fmt.Println("fts5       missing:", err)
@@ -441,6 +443,32 @@ func runInfo(dbPath, dir string) error {
 	probe.Close()
 	fmt.Printf("semantic   available (%s, %d dims)\n", embed.ModelName, embed.Dim)
 	return nil
+}
+
+// dirList collects a repeatable --dir flag.
+//
+// Repeatable rather than comma-separated because these are paths, and a path
+// may contain a comma. Empty until the flag is given at least once, so that a
+// caller can tell "not specified" from "specified as the default" and fall back
+// to its own answer.
+type dirList []string
+
+func (d *dirList) String() string { return strings.Join(*d, ", ") }
+
+func (d *dirList) Set(v string) error {
+	if v == "" {
+		return errors.New("empty path")
+	}
+	*d = append(*d, v)
+	return nil
+}
+
+// sessionDirs is the directories to index: what --dir said, or the default.
+func sessionDirs(flagged dirList) []string {
+	if len(flagged) > 0 {
+		return flagged
+	}
+	return []string{session.DefaultDir()}
 }
 
 func note(format string, args ...any) {

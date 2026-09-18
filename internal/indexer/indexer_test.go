@@ -59,7 +59,7 @@ func TestRunCatchesUpThenStops(t *testing.T) {
 	writeSession(t, dir, "aaa", "first")
 	writeSession(t, dir, "bbb", "second")
 
-	ix := New(openWriter(t), index.BuildOptions{Dir: dir}, titles.Options{})
+	ix := New(openWriter(t), index.BuildOptions{Dirs: []string{dir}}, titles.Options{})
 	if err := ix.Run(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestWatchIndexesNewSessions(t *testing.T) {
 	writeSession(t, dir, "aaa", "the original session")
 
 	db := openWriter(t)
-	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{})
+	ix := New(db, index.BuildOptions{Dirs: []string{dir}}, titles.Options{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -134,7 +134,7 @@ func TestWatchNoticesDeletedSessions(t *testing.T) {
 	dir := t.TempDir()
 	p := writeSession(t, dir, "aaa", "a doomed session")
 
-	ix := New(openWriter(t), index.BuildOptions{Dir: dir}, titles.Options{})
+	ix := New(openWriter(t), index.BuildOptions{Dirs: []string{dir}}, titles.Options{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = ix.Run(ctx, true) }()
@@ -154,7 +154,7 @@ func TestWatchNoticesDeletedSessions(t *testing.T) {
 // A build failure has to leave the status readable rather than wedged as
 // busy, or the header claims it is indexing for as long as the tab is open.
 func TestBuildFailureIsReported(t *testing.T) {
-	ix := New(openWriter(t), index.BuildOptions{Dir: filepath.Join(t.TempDir(), "missing")},
+	ix := New(openWriter(t), index.BuildOptions{Dirs: []string{filepath.Join(t.TempDir(), "missing")}},
 		titles.Options{})
 
 	if err := ix.Run(context.Background(), false); err == nil {
@@ -195,7 +195,7 @@ func TestRunGeneratesTitlesAfterTheBuild(t *testing.T) {
 
 	db := openWriter(t)
 	stub := &stubSummarizer{}
-	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{Summarizer: stub})
+	ix := New(db, index.BuildOptions{Dirs: []string{dir}}, titles.Options{Summarizer: stub})
 	stub.ix = ix
 
 	if err := ix.Run(context.Background(), false); err != nil {
@@ -224,7 +224,7 @@ func TestRunWithoutSummarizerSkipsTitling(t *testing.T) {
 	writeSession(t, dir, "aaa", "how do I center a div")
 
 	db := openWriter(t)
-	ix := New(db, index.BuildOptions{Dir: dir}, titles.Options{})
+	ix := New(db, index.BuildOptions{Dirs: []string{dir}}, titles.Options{})
 	if err := ix.Run(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}

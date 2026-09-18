@@ -21,7 +21,7 @@ import (
 	"github.com/llimllib/spireweb/internal/web"
 )
 
-func runServe(dbPath, addr, dir string, dev, launchBrowser, noWatch, noTitles bool, titleVia string) error {
+func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch, noTitles bool, titleVia string) error {
 	if _, err := os.Stat(dbPath); err != nil {
 		return fmt.Errorf("no index at %s; run 'spireweb index' first", dbPath)
 	}
@@ -55,7 +55,7 @@ func runServe(dbPath, addr, dir string, dev, launchBrowser, noWatch, noTitles bo
 	// A writer, separate from the read pool above. WAL lets handlers read a
 	// consistent snapshot while this one indexes, so a reindex triggered by a
 	// conversation in another terminal never blocks a request.
-	live, closeLive := startIndexer(ctx, dbPath, driver, dir, noWatch, noTitles, titleVia)
+	live, closeLive := startIndexer(ctx, dbPath, driver, dirs, noWatch, noTitles, titleVia)
 	if closeLive != nil {
 		defer closeLive()
 	}
@@ -103,7 +103,7 @@ func runServe(dbPath, addr, dir string, dev, launchBrowser, noWatch, noTitles bo
 // Failure here is not fatal. The server's job is to show what is already
 // indexed, and a second spireweb holding the write lock, or a read-only
 // filesystem, should cost live updates rather than the whole interface.
-func startIndexer(ctx context.Context, dbPath, driver, dir string, noWatch, noTitles bool, titleVia string) (web.StatusSource, func()) {
+func startIndexer(ctx context.Context, dbPath, driver string, dirs []string, noWatch, noTitles bool, titleVia string) (web.StatusSource, func()) {
 	if noWatch {
 		return nil, nil
 	}
@@ -123,7 +123,7 @@ func startIndexer(ctx context.Context, dbPath, driver, dir string, noWatch, noTi
 			"every message, which grows the database several times over")
 	}
 
-	opts := index.BuildOptions{Dir: dir}
+	opts := index.BuildOptions{Dirs: dirs}
 	if driver == index.SemanticDriverName {
 		if e, err := embed.New(writer.SQL(), embed.DefaultPaths()); err != nil {
 			note("new sessions will be indexed without embeddings: %v", err)

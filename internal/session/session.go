@@ -376,36 +376,59 @@ type FileInfo struct {
 	Size    int64
 }
 
-// Discover walks dir and returns every .jsonl session file.
+// Discover walks each directory and returns every .jsonl session file, as one
+// list.
+//
+// One list rather than one call per directory because Build treats anything it
+// does not see as deleted: given two roots, a build per root would have each
+// one remove the other's sessions.
 //
 // A missing or unreadable root is an error, while a bad subdirectory is not.
 // The distinction matters: one project directory that cannot be read should
 // not cost the other thousand, but a session directory that does not exist at
 // all means the path is wrong, and silently indexing nothing turns that into
 // an empty interface with no explanation.
-func Discover(dir string) ([]FileInfo, error) {
-	if fi, err := os.Stat(dir); err != nil {
-		return nil, err
-	} else if !fi.IsDir() {
-		return nil, fmt.Errorf("%s: not a directory", dir)
+//
+// Paths are returned once even if the roots overlap, which they can: a config
+// naming both a directory and its parent is a plausible mistake, and indexing
+// those files twice would be a confusing one.
+func Discover(dirs ...string) ([]FileInfo, error) {
+	if len(dirs) == 0 {
+		return nil, errors.New("no session directory to index")
 	}
 
 	var out []FileInfo
-	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable subtree: skip, do not abort the walk
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		if fi, err := os.Stat(dir); err != nil {
+			return nil, err
+		} else if !fi.IsDir() {
+			return nil, fmt.Errorf("%s: not a directory", dir)
 		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+
+		err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil // unreadable subtree: skip, do not abort the walk
+			}
+			if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+				return nil
+			}
+			if seen[p] {
+				return nil
+			}
+			fi, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			seen[p] = true
+			out = append(out, FileInfo{Path: p, ModTime: fi.ModTime(), Size: fi.Size()})
 			return nil
-		}
-		fi, err := d.Info()
+		})
 		if err != nil {
-			return nil
+			return out, err
 		}
-		out = append(out, FileInfo{Path: p, ModTime: fi.ModTime(), Size: fi.Size()})
-		return nil
-	})
-	return out, err
+	}
+	return out, nil
 }
 
 // collapse normalizes whitespace so chunk sizes reflect content rather than

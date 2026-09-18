@@ -17,7 +17,7 @@ func TestSessionRowRecordsHostAndReply(t *testing.T) {
 		"s1": {userMsg("how do I center a div"), assistantMsg("use flexbox")},
 	})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +54,7 @@ func TestSessionRowRecordsHostAndReply(t *testing.T) {
 func TestTitleSurvivesReindex(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("first question")}})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL().Exec(`UPDATE sessions SET title = ? WHERE id = 's1'`, "A good title"); err != nil {
@@ -75,7 +75,7 @@ func TestTitleSurvivesReindex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	pr, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}

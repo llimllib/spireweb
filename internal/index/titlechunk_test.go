@@ -33,7 +33,7 @@ func TestTitleIsIndexedAsAChunk(t *testing.T) {
 	})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ func TestTitleIsIndexedAsAChunk(t *testing.T) {
 
 	// The next build picks it up, even though the file has not changed: that
 	// is what the backfill promotion is for.
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	got := chunkBodies(t, db, "s1", RoleTitle)
@@ -75,13 +75,13 @@ func TestTitleChunkClaimsNoMessage(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("hello")}})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetTitle(ctx, "s1", "A generated title", "key1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,13 +101,13 @@ func TestTitleChunkIsReused(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("hello")}})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetTitle(ctx, "s1", "A generated title", "key1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,7 +118,7 @@ func TestTitleChunkIsReused(t *testing.T) {
 	}
 
 	// A full pass, which is what the backfill promotion does.
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir, Full: true}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}, Full: true}); err != nil {
 		t.Fatal(err)
 	}
 	var after int64
@@ -137,19 +137,19 @@ func TestRetitlingReplacesTheChunk(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("hello")}})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetTitle(ctx, "s1", "The first title", "key1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetTitle(ctx, "s1", "A better second title", "key2", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,14 +178,14 @@ func TestTitleChunkBackfillSettles(t *testing.T) {
 	})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetTitle(ctx, "s1", "A title", "key1", 1); err != nil {
 		t.Fatal(err)
 	}
 
-	p, err := Build(ctx, db, BuildOptions{Dir: dir})
+	p, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestTitleChunkBackfillSettles(t *testing.T) {
 		t.Errorf("indexed = %d, want a full pass to pick the title up", p.Indexed)
 	}
 
-	p, err = Build(ctx, db, BuildOptions{Dir: dir})
+	p, err = Build(ctx, db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}

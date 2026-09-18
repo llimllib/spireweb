@@ -40,7 +40,7 @@ func indexFixture(t *testing.T, sessions map[string][]string) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: dir}); err != nil {
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	return db.SQL()

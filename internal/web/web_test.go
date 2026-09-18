@@ -89,7 +89,7 @@ func newFixture(t *testing.T, sessions map[string][]string) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: dir}); err != nil {
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -796,7 +796,7 @@ func (f *fixture) setTitle(t *testing.T, id, title string) {
 	if err := db.SetTitle(context.Background(), id, title, "k", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: f.dir}); err != nil {
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dirs: []string{f.dir}}); err != nil {
 		t.Fatal(err)
 	}
 }

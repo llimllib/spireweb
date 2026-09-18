@@ -53,7 +53,7 @@ func TestBuildExcludesSDKSessions(t *testing.T) {
 	writeClaudeSession(t, dir, "titler", "sdk-cli", "You write short titles")
 
 	db := openTest(t)
-	p, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestBuildDropsAlreadyIndexedSDKSessions(t *testing.T) {
 
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if !indexedIDs(t, db)["bridged"] {
@@ -97,7 +97,7 @@ func TestBuildDropsAlreadyIndexedSDKSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr, err := Build(ctx, db, BuildOptions{Dir: dir, Full: true})
+	pr, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}, Full: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestBuildKeepsPiSessions(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("hello from pi")}})
 
 	db := openTest(t)
-	p, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}

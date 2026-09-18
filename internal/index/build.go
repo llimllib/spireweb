@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ type Progress struct {
 
 // BuildOptions configures a Build run.
 type BuildOptions struct {
-	Dir        string         // session directory
+	Dirs       []string       // session directories, indexed as one corpus
 	ChunkChars int            // 0 uses session.MaxChunkChars
 	Full       bool           // reindex everything, ignoring mtime/size
 	OnProgress func(Progress) // optional, called as work proceeds
@@ -74,8 +75,8 @@ type Embedder interface {
 // That is cheap and catches every real edit: pi appends to sessions, so any new
 // message changes both. Files that vanished are removed from the index.
 func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
-	if opts.Dir == "" {
-		opts.Dir = session.DefaultDir()
+	if len(opts.Dirs) == 0 {
+		opts.Dirs = []string{session.DefaultDir()}
 	}
 	if opts.ChunkChars <= 0 {
 		opts.ChunkChars = session.MaxChunkChars
@@ -132,9 +133,9 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		opts.Full = need
 	}
 
-	files, err := session.Discover(opts.Dir)
+	files, err := session.Discover(opts.Dirs...)
 	if err != nil {
-		return Progress{Err: err}, fmt.Errorf("discover %s: %w", opts.Dir, err)
+		return Progress{Err: err}, fmt.Errorf("discover %s: %w", strings.Join(opts.Dirs, ", "), err)
 	}
 
 	known, err := d.knownFiles()

@@ -47,7 +47,7 @@ func indexed(t *testing.T, specs map[string][]string) (*index.DB, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: dir}); err != nil {
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	return db, dir
@@ -155,7 +155,7 @@ func TestRunRehashesGrownSessionWithoutCallingTheModel(t *testing.T) {
 	if err := os.Chtimes(p, time.Now(), time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dir: dir}); err != nil {
+	if _, err := index.Build(context.Background(), db, index.BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 

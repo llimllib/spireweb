@@ -38,9 +38,9 @@ type WatchEvent struct {
 // every project directory is watched individually and new ones are added as they
 // appear -- starting a pi session in a new project creates a directory.
 type Watcher struct {
-	db   *DB
-	opts BuildOptions
-	root string
+	db    *DB
+	opts  BuildOptions
+	roots []string
 
 	fs      *fsnotify.Watcher
 	mu      sync.Mutex
@@ -49,8 +49,8 @@ type Watcher struct {
 
 // NewWatcher prepares a watcher over opts.Dir.
 func NewWatcher(db *DB, opts BuildOptions) (*Watcher, error) {
-	if opts.Dir == "" {
-		opts.Dir = session.DefaultDir()
+	if len(opts.Dirs) == 0 {
+		opts.Dirs = []string{session.DefaultDir()}
 	}
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -59,7 +59,7 @@ func NewWatcher(db *DB, opts BuildOptions) (*Watcher, error) {
 	w := &Watcher{
 		db:      db,
 		opts:    opts,
-		root:    opts.Dir,
+		roots:   opts.Dirs,
 		fs:      fsw,
 		pending: map[string]bool{},
 	}
@@ -70,20 +70,29 @@ func NewWatcher(db *DB, opts BuildOptions) (*Watcher, error) {
 	return w, nil
 }
 
-// addTree watches the root and every project directory beneath it.
+// addTree watches each root and every project directory beneath it.
+//
+// One level deep is enough for both layouts: pi writes
+// <root>/<mangled-cwd>/<file>.jsonl and Claude Code writes
+// <root>/<mangled-cwd>/<uuid>.jsonl. Claude Code also puts a directory per
+// session alongside the files, but it holds tool output rather than any
+// .jsonl, so nothing there needs watching.
 func (w *Watcher) addTree() error {
-	if err := w.fs.Add(w.root); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(w.root)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			// Ignore errors: a directory may vanish between listing and adding,
-			// and one unwatchable project should not prevent watching the rest.
-			_ = w.fs.Add(filepath.Join(w.root, e.Name()))
+	for _, root := range w.roots {
+		if err := w.fs.Add(root); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				// Ignore errors: a directory may vanish between listing and
+				// adding, and one unwatchable project should not prevent
+				// watching the rest.
+				_ = w.fs.Add(filepath.Join(root, e.Name()))
+			}
 		}
 	}
 	return nil

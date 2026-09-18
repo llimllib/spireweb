@@ -24,7 +24,7 @@ func TestArchiveStoresEveryMessageVerbatim(t *testing.T) {
 		"s1": {userMsg("how do I center a div"), assistantMsg("use flexbox")},
 	})
 	db := openTest(t)
-	p, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestArchiveKeepsUnknownRolesAndFields(t *testing.T) {
 	}
 
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestArchiveKeepsUnknownRolesAndFields(t *testing.T) {
 func TestArchiveIsIncremental(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("first")}})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestArchiveIsIncremental(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	pr, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestArchiveDropsMessagesThatWentAway(t *testing.T) {
 		"s1": {userMsg("first"), userMsg("second"), userMsg("third")},
 	})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := archivedCount(t, db, "s1"); n != 3 {
@@ -159,7 +159,7 @@ func TestArchiveDropsMessagesThatWentAway(t *testing.T) {
 	if err := os.Chtimes(p, time.Now(), time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := archivedCount(t, db, "s1"); n != 1 {
@@ -172,13 +172,13 @@ func TestArchiveDropsMessagesThatWentAway(t *testing.T) {
 func TestArchiveCascadesWithTheSession(t *testing.T) {
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("first")}})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(dir, "--Users-me-code-proj--", "s1.jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := archivedCount(t, db, "s1"); n != 0 {
@@ -194,7 +194,7 @@ func TestArchiveBackfillsAnOlderIndex(t *testing.T) {
 		"s2": {userMsg("second")},
 	})
 	db := openTest(t)
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +203,7 @@ func TestArchiveBackfillsAnOlderIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestArchiveBackfillsAnOlderIndex(t *testing.T) {
 	}
 
 	// And a run after that has nothing to do.
-	p, err = Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err = Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}

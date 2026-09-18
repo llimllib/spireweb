@@ -32,7 +32,7 @@ func TestWatcherIndexesNewSession(t *testing.T) {
 	}
 	db := openTest(t)
 
-	w, err := NewWatcher(db, BuildOptions{Dir: dir})
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,12 +82,12 @@ func TestWatcherAppendReusesChunks(t *testing.T) {
 
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	before := chunkIDs(t, db, "grow-w")
 
-	w, err := NewWatcher(db, BuildOptions{Dir: dir})
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +128,11 @@ func TestWatcherRemovesDeletedSession(t *testing.T) {
 
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
-	w, err := NewWatcher(db, BuildOptions{Dir: dir})
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestWatcherPicksUpNewProjectDir(t *testing.T) {
 	dir := t.TempDir()
 	db := openTest(t)
 
-	w, err := NewWatcher(db, BuildOptions{Dir: dir})
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestWatcherCoalescesBurst(t *testing.T) {
 	os.WriteFile(p, []byte(head+"\n"), 0o644)
 
 	db := openTest(t)
-	w, err := NewWatcher(db, BuildOptions{Dir: dir})
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}

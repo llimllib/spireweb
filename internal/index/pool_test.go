@@ -21,7 +21,7 @@ func TestReaderRefusesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -56,7 +56,7 @@ func TestReaderOpensWithoutAWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := writeCorpus(t, map[string][]string{"s1": {userMsg("hello")}})
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Checkpoint(); err != nil {

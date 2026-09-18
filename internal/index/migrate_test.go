@@ -18,7 +18,7 @@ func TestMigrateAddsTitleColumnsToAnExistingIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	// Roll the schema back to what it was before this milestone.
@@ -66,7 +66,7 @@ func TestTitleCandidatesAndWrites(t *testing.T) {
 	})
 	db := openTest(t)
 	ctx := context.Background()
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 

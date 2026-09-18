@@ -57,7 +57,7 @@ func TestBuildAndStats(t *testing.T) {
 	})
 	db := openTest(t)
 
-	p, err := Build(context.Background(), db, BuildOptions{Dir: dir})
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,10 +87,10 @@ func TestBuildIncremental(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Build(ctx, db, BuildOptions{Dir: dir})
+	p, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestBuildIncremental(t *testing.T) {
 	}
 
 	// --full ignores mtime and reindexes anyway.
-	p, err = Build(ctx, db, BuildOptions{Dir: dir, Full: true})
+	p, err = Build(ctx, db, BuildOptions{Dirs: []string{dir}, Full: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestBuildDetectsChange(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestBuildDetectsChange(t *testing.T) {
 	future := time.Now().Add(2 * time.Second)
 	os.Chtimes(p, future, future)
 
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := db.Stats()
@@ -150,13 +150,13 @@ func TestBuildRemovesDeleted(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(dir, "--Users-me-code-proj--", "s2.jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -185,7 +185,7 @@ func TestFTSStaysConsistent(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		if _, err := Build(ctx, db, BuildOptions{Dir: dir, Full: true}); err != nil {
+		if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}, Full: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -290,7 +290,7 @@ func TestBuildReusesUnchangedChunks(t *testing.T) {
 	ctx := context.Background()
 
 	write(5)
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	ids1 := chunkIDs(t, db, "grow")
@@ -302,7 +302,7 @@ func TestBuildReusesUnchangedChunks(t *testing.T) {
 	write(10)
 	future := time.Now().Add(2 * time.Second)
 	os.Chtimes(p, future, future)
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	ids2 := chunkIDs(t, db, "grow")
@@ -335,14 +335,14 @@ func TestBuildDropsRemovedChunks(t *testing.T) {
 	ctx := context.Background()
 
 	writeMsgs("keep this text", "remove_me_marker text")
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
 	writeMsgs("keep this text")
 	future := time.Now().Add(2 * time.Second)
 	os.Chtimes(p, future, future)
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -372,12 +372,12 @@ func TestBuildHandlesRenamedFile(t *testing.T) {
 	ctx := context.Background()
 
 	os.WriteFile(filepath.Join(sub, "a.jsonl"), []byte(body), 0o644)
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(sub, "a.jsonl"))
 	os.WriteFile(filepath.Join(sub, "b.jsonl"), []byte(body), 0o644)
-	if _, err := Build(ctx, db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -468,7 +468,7 @@ func TestOpenOrResetKeepsGoodIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -498,7 +498,7 @@ func TestReaderQueriesDuringWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}}); err != nil {
 		t.Fatal(err)
 	}
 

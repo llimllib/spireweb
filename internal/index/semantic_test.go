@@ -69,7 +69,7 @@ func TestNearestNeighbourFindsParaphrase(t *testing.T) {
 	if err := db.EnsureVectorTable(e.Dim()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(context.Background(), db, BuildOptions{Dir: dir, Embedder: e}); err != nil {
+	if _, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}, Embedder: e}); err != nil {
 		t.Fatal(err)
 	}
 
