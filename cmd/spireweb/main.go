@@ -27,12 +27,14 @@ var Version = "dev"
 const usage = `spireweb - search and read pi agent sessions
 
 usage:
-  spireweb serve [flags]   browse sessions in a web interface
+  spireweb [flags]         browse sessions in a web interface (same as serve)
+  spireweb serve [flags]   the same, named explicitly
   spireweb index [flags]   build or update the search index
   spireweb stats [flags]   report what is in the index
   spireweb doctor [flags]  check the index for inconsistencies
   spireweb info            show paths and configuration
   spireweb version
+  spireweb help
 
 flags:
   --db PATH      index location (default %s)
@@ -51,13 +53,26 @@ flags:
                  Defaults to the settings file's titles value.
 `
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, usage, index.DefaultPath())
-		os.Exit(2)
+// command splits the subcommand from its flags, defaulting to serve.
+//
+// There is no second thing a bare `spireweb` could plausibly mean: index is a
+// step on the way to serving, stats and doctor are diagnostics, and nobody's
+// first intent is to read usage. `brew install spireweb && spireweb` is what
+// the install is for.
+//
+// A leading flag is not a subcommand, so `spireweb --addr :9000` serves on that
+// address rather than complaining about an unknown command. That is the reason
+// this is a function rather than a length check: the flags have to be parsed
+// after deciding there is no subcommand, not before.
+func command(argv []string) (string, []string) {
+	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
+		return argv[0], argv[1:]
 	}
+	return "serve", argv
+}
 
-	cmd := os.Args[1]
+func main() {
+	cmd, args := command(os.Args[1:])
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	dbPath := fs.String("db", index.DefaultPath(), "index location")
 	var dirs dirList
@@ -79,30 +94,34 @@ func main() {
 	var err error
 	switch cmd {
 	case "serve":
-		_ = fs.Parse(os.Args[2:])
+		_ = fs.Parse(args)
 		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr, *titleVia); serr != nil {
 			err = serr
 		} else {
 			err = runServe(s.dbPath, s.addr, s.dirs, *dev, *openBrowser, *noWatch, s.titles)
 		}
 	case "index":
-		_ = fs.Parse(os.Args[2:])
+		_ = fs.Parse(args)
 		if s, serr := resolve(givenFlags(fs), dirs, *dbPath, *addr, *titleVia); serr != nil {
 			err = serr
 		} else {
 			err = runIndex(s.dbPath, s.dirs, *full, *lexical, *titleLimit, s.titles)
 		}
 	case "stats":
-		_ = fs.Parse(os.Args[2:])
+		_ = fs.Parse(args)
 		err = runStats(configuredDB(givenFlags(fs), *dbPath))
 	case "doctor":
-		_ = fs.Parse(os.Args[2:])
+		_ = fs.Parse(args)
 		err = runDoctor(configuredDB(givenFlags(fs), *dbPath))
 	case "info":
-		_ = fs.Parse(os.Args[2:])
+		_ = fs.Parse(args)
 		err = runInfo(configuredDB(givenFlags(fs), *dbPath), dirs)
 	case "version":
 		fmt.Println("spireweb", Version)
+	case "help":
+		// Asked for, so stdout and a success exit; the same text reaches
+		// stderr with status 2 when it is a complaint about the arguments.
+		fmt.Printf(usage, index.DefaultPath())
 	default:
 		fs.Usage()
 		os.Exit(2)

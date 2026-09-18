@@ -12,8 +12,11 @@ keyword search by reciprocal rank fusion.
 
 ```bash
 brew install llimllib/tap/spireweb
-spireweb serve
+spireweb
 ```
+
+That serves on <http://127.0.0.1:8080>, building the index behind the page if
+there is not one yet. `spireweb help` lists the other commands.
 
 macOS on Apple Silicon. The cask carries the embedding model and the search
 extension alongside the binary, so nothing else is downloaded.

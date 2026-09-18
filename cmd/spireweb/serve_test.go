@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/llimllib/spireweb/internal/index"
@@ -66,5 +67,29 @@ func TestBootstrapIndexLeavesAnExistingIndexAlone(t *testing.T) {
 	defer db.Close()
 	if v, err := db.Meta("bootstrap-test"); err != nil || v != "kept" {
 		t.Errorf("Meta() = %q, %v; want the value written before", v, err)
+	}
+}
+
+// A bare `spireweb` serves, and a leading flag does not become a subcommand --
+// otherwise `spireweb --addr :9000` would complain instead of doing the obvious
+// thing.
+func TestCommandDefaultsToServe(t *testing.T) {
+	tests := []struct {
+		argv     []string
+		wantCmd  string
+		wantArgs []string
+	}{
+		{nil, "serve", nil},
+		{[]string{"--addr", ":9000"}, "serve", []string{"--addr", ":9000"}},
+		{[]string{"-open"}, "serve", []string{"-open"}},
+		{[]string{"index", "--full"}, "index", []string{"--full"}},
+		{[]string{"help"}, "help", []string{}},
+	}
+	for _, tc := range tests {
+		cmd, args := command(tc.argv)
+		if cmd != tc.wantCmd || !slices.Equal(args, tc.wantArgs) {
+			t.Errorf("command(%q) = %q, %q; want %q, %q",
+				tc.argv, cmd, args, tc.wantCmd, tc.wantArgs)
+		}
 	}
 }

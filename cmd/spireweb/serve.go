@@ -75,7 +75,11 @@ func runServe(dbPath, addr string, dirs []string, dev, launchBrowser, noWatch bo
 		return err
 	}
 	url := "http://" + ln.Addr().String()
+	// The subcommands are not visible on a bare `spireweb`, which is now the
+	// usual way to run it. One line restores them without anyone reading usage
+	// they did not ask for.
 	fmt.Printf("spireweb %s serving %d sessions on %s\n", Version, n, url)
+	fmt.Println("'spireweb help' lists the other commands")
 	if dev {
 		fmt.Println("dev mode: templates and static files reload from disk")
 	}
