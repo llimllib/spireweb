@@ -34,7 +34,7 @@ usage:
 
 flags:
   --db PATH      index location (default %s)
-  --dir PATH     session directory, repeatable (default %s)
+  --dir PATH     session directory, repeatable (default: detected)
   --full         reindex everything rather than what changed
   --lexical      skip semantic indexing, even if the model is installed
   --addr ADDR    serve on this address (default 127.0.0.1:8080)
@@ -49,7 +49,7 @@ flags:
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir())
+		fmt.Fprintf(os.Stderr, usage, index.DefaultPath())
 		os.Exit(2)
 	}
 
@@ -70,16 +70,24 @@ func main() {
 	// -- before committing to all eleven hundred.
 	titleLimit := fs.Int("titles", 0, "stop after generating N titles")
 	titleVia := fs.String("titles-via", titles.BackendAPI, "api or claude")
-	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath(), session.DefaultDir()) }
+	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, index.DefaultPath()) }
 
 	var err error
 	switch cmd {
 	case "serve":
 		_ = fs.Parse(os.Args[2:])
-		err = runServe(*dbPath, *addr, sessionDirs(dirs), *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
+		if d, derr := sessionDirs(dirs); derr != nil {
+			err = derr
+		} else {
+			err = runServe(*dbPath, *addr, d, *dev, *openBrowser, *noWatch, *noTitles, *titleVia)
+		}
 	case "index":
 		_ = fs.Parse(os.Args[2:])
-		err = runIndex(*dbPath, sessionDirs(dirs), *full, *lexical, *noTitles, *titleLimit, *titleVia)
+		if d, derr := sessionDirs(dirs); derr != nil {
+			err = derr
+		} else {
+			err = runIndex(*dbPath, d, *full, *lexical, *noTitles, *titleLimit, *titleVia)
+		}
 	case "stats":
 		_ = fs.Parse(os.Args[2:])
 		err = runStats(*dbPath)
@@ -88,7 +96,7 @@ func main() {
 		err = runDoctor(*dbPath)
 	case "info":
 		_ = fs.Parse(os.Args[2:])
-		err = runInfo(*dbPath, sessionDirs(dirs))
+		err = runInfo(*dbPath, dirs)
 	case "version":
 		fmt.Println("spireweb", Version)
 	default:
@@ -414,11 +422,24 @@ func runDoctor(dbPath string) error {
 	return nil
 }
 
-func runInfo(dbPath string, dirs []string) error {
+// runInfo resolves the session directories itself rather than being handed
+// them, because it must not refuse to run when there are none. It is the
+// command someone runs precisely because nothing is working, and "no sessions
+// found" is the answer it exists to give.
+func runInfo(dbPath string, flagged dirList) error {
 	paths := embed.DefaultPaths()
 	fmt.Printf("spireweb %s (%s %s/%s)\n\n", Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+
+	sessions := "none found; looked in\n           " +
+		strings.Join(session.Candidates(), "\n           ")
+	switch {
+	case len(flagged) > 0:
+		sessions = strings.Join(flagged, "\n           ")
+	case len(session.Detect()) > 0:
+		sessions = strings.Join(session.Detect(), "\n           ")
+	}
 	fmt.Printf("sessions   %s\nindex      %s\nextension  %s\nmodel      %s\n\n",
-		strings.Join(dirs, "\n           "), dbPath, paths.Extension, paths.Model)
+		sessions, dbPath, paths.Extension, paths.Model)
 
 	if err := index.CheckFTS5(); err != nil {
 		fmt.Println("fts5       missing:", err)
@@ -463,12 +484,29 @@ func (d *dirList) Set(v string) error {
 	return nil
 }
 
-// sessionDirs is the directories to index: what --dir said, or the default.
-func sessionDirs(flagged dirList) []string {
+// sessionDirs is the directories to index: what --dir said, or whatever is on
+// the machine.
+//
+// Detecting rather than defaulting to pi's directory is what lets spireweb be
+// run with no arguments at all. Telling someone to pass --dir before they can
+// see anything is how a tool goes uninstalled, and the answer is on disk.
+//
+// Only cmd detects. index.Build still falls back to pi's directory when given
+// none, because it is a library and a test that indexes a fixture should not
+// depend on what the machine running it happens to have.
+func sessionDirs(flagged dirList) ([]string, error) {
 	if len(flagged) > 0 {
-		return flagged
+		return flagged, nil
 	}
-	return []string{session.DefaultDir()}
+	if dirs := session.Detect(); len(dirs) > 0 {
+		note("indexing %s", strings.Join(dirs, ", "))
+		return dirs, nil
+	}
+	// Finding nothing is worth an error rather than an empty interface. Name
+	// everywhere that was looked, because the usual cause is sessions living
+	// somewhere this does not know about, and --dir is then the answer.
+	return nil, fmt.Errorf("no agent sessions found. Looked in:\n  %s\nUse --dir to name one",
+		strings.Join(session.Candidates(), "\n  "))
 }
 
 func note(format string, args ...any) {
