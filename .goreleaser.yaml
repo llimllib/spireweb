@@ -87,7 +87,9 @@ changelog:
 homebrew_casks:
   - name: spireweb
     homepage: "https://github.com/llimllib/spireweb"
-    description: "Search and read pi agent sessions"
+    # Both agents, which the cask has claimed since v0.0.1 without saying so:
+    # reading Claude Code's format is most of what M11 was.
+    description: "Search and read agent sessions from pi and Claude Code"
     # Only the binary goes onto PATH. The extension and the model stay in the
     # Caskroom beside it, which embed.DefaultPaths finds by resolving the
     # symlink -- see internal/embed/paths_test.go.
