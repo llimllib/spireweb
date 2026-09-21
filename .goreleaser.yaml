@@ -60,6 +60,10 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_macos_arm64"
     files:
       - README.md
+      # MIT asks that the copyright notice travel with copies of the software,
+      # and a tarball someone downloads is a copy. NOTICE.md carries the same
+      # for what is redistributed inside and beside the binary.
+      - LICENSE
       - NOTICE.md
       # Flat, beside the binary, because that is where embed.DefaultPaths looks:
       # it resolves the executable and checks its own directory first. A
@@ -90,6 +94,10 @@ homebrew_casks:
     # Both agents, which the cask has claimed since v0.0.1 without saying so:
     # reading Claude Code's format is most of what M11 was.
     description: "Search and read agent sessions from pi and Claude Code"
+    # No license field here, though the config accepts one: goreleaser parses it
+    # and its cask template never emits it -- checked at 2.17.0, 2.18.1 and
+    # main. Homebrew requires the stanza of formulae, not casks. LICENSE travels
+    # in the archive instead, which is what MIT actually asks for.
     # Only the binary goes onto PATH. The extension and the model stay in the
     # Caskroom beside it, which embed.DefaultPaths finds by resolving the
     # symlink -- see internal/embed/paths_test.go.

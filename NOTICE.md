@@ -1,7 +1,8 @@
 # Third-party components
 
-The release archive ships two files alongside the `spireweb` binary. Both are
-third-party work, redistributed under the licences below.
+spireweb is MIT-licensed; see `LICENSE`. This file covers the third-party work
+it redistributes: two files that the release archive ships alongside the
+`spireweb` binary, and one library compiled into the binary itself.
 
 ## lembed0.dylib
 
@@ -23,3 +24,18 @@ quantised to Q8_0 and converted to GGUF by
 [leliuga](https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF).
 
 - Apache-2.0
+
+## sqlite-vec
+
+[sqlite-vec](https://github.com/asg017/sqlite-vec) provides the `vec0` virtual
+table the embeddings live in. Unlike the two above it is not a visible file: the
+cgo bindings compile `sqlite-vec.c` into the `spireweb` binary itself, which is
+exactly why it needs saying here.
+
+- sqlite-vec, and its
+  [Go bindings](https://github.com/asg017/sqlite-vec-go-bindings) — Apache-2.0,
+  © Alex Garcia
+
+Full text at <https://www.apache.org/licenses/LICENSE-2.0>. Apache-2.0 asks that
+its notices travel with redistributions, and MIT on spireweb's own code does not
+change that: every file keeps the licence it arrived under.
