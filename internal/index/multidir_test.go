@@ -256,3 +256,52 @@ func TestWatcherDropsASessionThatBecomesExcluded(t *testing.T) {
 		return !indexedIDs(t, db)["leaked"]
 	})
 }
+
+// The live path for the empty case, and the one that matters: Claude Code
+// creates the session file when the session opens, so the watcher sees it
+// before there is anything in it. It must stay out while it is empty and go in
+// the moment it is not -- a rule that only excluded would lose the first real
+// message of every session written under the watcher.
+func TestWatcherExcludesEmptySessionsUntilTheyHaveAMessage(t *testing.T) {
+	root := t.TempDir()
+	installSession(t, filepath.Join(root, "seed"), "seed-1", "already here")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWatcher(db, BuildOptions{Dirs: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(wctx, nil)
+
+	p := writeSlashCommandSession(t, root, "opening")
+	writeClaudeSession(t, root, "real", "cli", "an actual conversation")
+
+	waitFor(t, 10*time.Second, "the real session to be indexed", func() bool {
+		return indexedIDs(t, db)["real"]
+	})
+	// As above: "not indexed yet" and "never indexed" are the same observation
+	// without a settle in between.
+	time.Sleep(2 * WatchSettle)
+	if indexedIDs(t, db)["opening"] {
+		t.Error("the watcher indexed a session with no conversation in it")
+	}
+
+	// Someone types. Nothing recorded the exclusion, so this is an ordinary
+	// change to an unknown file.
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	writeClaudeSession(t, root, "opening", "cli", "now there is something to say")
+
+	waitFor(t, 10*time.Second, "the session to be indexed once it had a message", func() bool {
+		return indexedIDs(t, db)["opening"]
+	})
+}

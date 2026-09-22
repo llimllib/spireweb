@@ -19,6 +19,12 @@ func userMsg(text string) string {
 	return `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
+// imageMsg is a message with no prose in it. A session of nothing but these is
+// indexed -- it has messages -- and has nothing for a summarizer to read.
+func imageMsg() string {
+	return `{"type":"message","message":{"role":"user","content":[{"type":"image"}]}}`
+}
+
 // corpus writes session files and returns the directory holding them.
 func corpus(t *testing.T, specs map[string][]string) string {
 	t.Helper()
@@ -209,8 +215,12 @@ func TestRunLeavesFallbackOnFailure(t *testing.T) {
 
 var errNope = fmt.Errorf("anthropic: 401 invalid x-api-key")
 
+// Messages, but not a word of text between them: the pass has to settle the
+// row without paying for a call. A session with no messages at all cannot
+// stand in for this -- index.Build excludes those before they reach the
+// titles pass, so it would test an empty database instead.
 func TestRunSkipsSessionsWithNoProse(t *testing.T) {
-	db, _ := indexed(t, map[string][]string{"s1": {}})
+	db, _ := indexed(t, map[string][]string{"s1": {imageMsg()}})
 	f := &fake{}
 	p, err := Run(context.Background(), db, Options{Summarizer: f})
 	if err != nil {

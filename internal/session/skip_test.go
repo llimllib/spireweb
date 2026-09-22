@@ -78,6 +78,69 @@ func TestSkipReasonIgnoresTheKeyAppearingInContent(t *testing.T) {
 	}
 }
 
+// The records Claude Code writes for a session someone opened, ran a slash
+// command in, and quit. Taken from a real file: none of them is a user or
+// assistant record, so the session parses to no messages at all and reaches
+// the list as a row with no preview and nothing to title.
+var slashCommandOnly = []string{
+	`{"type":"mode","mode":"normal","sessionId":"f1ecd8cc"}`,
+	`{"type":"permission-mode","permissionMode":"default","sessionId":"f1ecd8cc"}`,
+	`{"type":"system","subtype":"local_command","uuid":"6762df6f","parentUuid":null,` +
+		`"entrypoint":"cli","sessionId":"f1ecd8cc","cwd":"/tmp",` +
+		`"content":"<command-name>/model</command-name>"}`,
+	`{"type":"system","subtype":"local_command","uuid":"a0b33bd3","parentUuid":"6762df6f",` +
+		`"entrypoint":"cli","sessionId":"f1ecd8cc","cwd":"/tmp",` +
+		`"content":"<local-command-stdout>Kept model as ` + "`Opus 5.5`" + `</local-command-stdout>"}`,
+	`{"type":"cost-state","sessionId":"f1ecd8cc"}`,
+	`{"type":"last-prompt","leafUuid":"a0b33bd3","sessionId":"f1ecd8cc"}`,
+}
+
+func TestSkipParsedReason(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"slash command and nothing else", slashCommandOnly, SkipEmpty},
+		{"a conversation", []string{claudeLine("cli", "hello")}, ""},
+		{
+			"a pi session",
+			[]string{
+				`{"type":"session","version":1,"id":"p","timestamp":"2026-09-01T10:00:00Z","cwd":"/tmp"}`,
+				`{"type":"message","timestamp":"2026-09-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`,
+			},
+			"",
+		},
+		{
+			// Nothing in it yet. Excluding it is right for exactly as long as
+			// that is true; the next write is what brings it back.
+			"a pi session with only a header",
+			[]string{`{"type":"session","version":1,"id":"p","timestamp":"2026-09-01T10:00:00Z","cwd":"/tmp"}`},
+			SkipEmpty,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := Parse(writeLines(t, tc.lines...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := SkipParsedReason(s); got != tc.want {
+				t.Errorf("SkipParsedReason = %q, want %q (%d messages)", got, tc.want, len(s.Messages))
+			}
+		})
+	}
+}
+
+// The slash-command file is a real cli session, so the byte-level rule has no
+// opinion on it. Only the parse can say it is empty, which is why the two
+// tests exist separately.
+func TestSkipReasonKeepsSlashCommandSessions(t *testing.T) {
+	if got := SkipReason(writeLines(t, slashCommandOnly...)); got != "" {
+		t.Errorf("SkipReason = %q, want \"\": entrypoint is cli", got)
+	}
+}
+
 // An unreadable file is the parser's problem to report, so that one code path
 // explains it rather than two.
 func TestSkipReasonDoesNotClaimMissingFiles(t *testing.T) {

@@ -30,7 +30,7 @@ type Progress struct {
 	Done     int    // files examined
 	Indexed  int    // files parsed and written
 	Skipped  int    // unchanged since last run
-	Excluded int    // not a session worth indexing; see session.SkipReason
+	Excluded int    // not a session worth indexing; see session.SkipReason and SkipParsedReason
 	Failed   int    // unparseable
 	Chunks   int    // chunks written this run
 	Current  string // file being worked on
@@ -185,6 +185,20 @@ func Build(ctx context.Context, d *DB, opts BuildOptions) (Progress, error) {
 		s, err := session.ParseWithRaw(f.Path)
 		if err != nil {
 			p.Failed++
+			report(p)
+			continue
+		}
+
+		// The other half of the rule, and it can only be asked here: whether a
+		// session holds a conversation is not a question about its bytes.
+		//
+		// Unmarked again, for the reason above -- but by hand, because seen is
+		// set before the parse. It has to be: a file that fails to parse must
+		// stay seen, or a session caught mid-write would be swept out of the
+		// index for being briefly unreadable.
+		if session.SkipParsedReason(s) != "" {
+			delete(seen, f.Path)
+			p.Excluded++
 			report(p)
 			continue
 		}

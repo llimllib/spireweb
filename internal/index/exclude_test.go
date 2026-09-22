@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +107,120 @@ func TestBuildDropsAlreadyIndexedSDKSessions(t *testing.T) {
 	}
 	if indexedIDs(t, db)["bridged"] {
 		t.Error("an excluded session stayed in the index")
+	}
+}
+
+// writeSlashCommandSession writes what Claude Code leaves behind when someone
+// opens a session, runs a slash command and quits: a real cli session holding
+// no user or assistant record, and so no conversation.
+func writeSlashCommandSession(t *testing.T, dir, id string) string {
+	t.Helper()
+	sub := filepath.Join(dir, "-Users-me-code-proj")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		fmt.Sprintf(`{"type":"mode","mode":"normal","sessionId":%q}`, id),
+		fmt.Sprintf(`{"type":"system","subtype":"local_command","uuid":"u1","entrypoint":"cli",`+
+			`"sessionId":%q,"cwd":"/Users/me/code/proj",`+
+			`"content":"<command-name>/model</command-name>"}`, id),
+		fmt.Sprintf(`{"type":"last-prompt","leafUuid":"u1","sessionId":%q}`, id),
+	}
+	p := filepath.Join(sub, id+".jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// Its entrypoint is cli, so it passes the byte-level rule and is caught only
+// after parsing. Indexed it is a row with no preview, no reply and nothing for
+// the titles pass to work from.
+func TestBuildExcludesConversationlessSessions(t *testing.T) {
+	dir := t.TempDir()
+	writeClaudeSession(t, dir, "real", "cli", "how do I pin a dependency")
+	writeSlashCommandSession(t, dir, "slash")
+
+	db := openTest(t)
+	p, err := Build(context.Background(), db, BuildOptions{Dirs: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Indexed != 1 || p.Excluded != 1 {
+		t.Errorf("indexed %d, excluded %d; want 1 and 1", p.Indexed, p.Excluded)
+	}
+	got := indexedIDs(t, db)
+	if !got["real"] {
+		t.Error("the real session was not indexed")
+	}
+	if got["slash"] {
+		t.Error("the slash-command session was indexed")
+	}
+}
+
+// Same bargain the SDK rule makes: the file will never change again, so the
+// row it already has can only go on a full pass, and only because the check
+// unmarks it and lets the sweep take it.
+func TestBuildDropsAlreadyIndexedConversationlessSessions(t *testing.T) {
+	dir := t.TempDir()
+	p := writeClaudeSession(t, dir, "slash", "cli", "indexed before the rule")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
+		t.Fatal(err)
+	}
+	if !indexedIDs(t, db)["slash"] {
+		t.Fatal("setup: session was not indexed")
+	}
+
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	writeSlashCommandSession(t, dir, "slash")
+
+	pr, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Excluded != 1 {
+		t.Errorf("Excluded = %d, want 1", pr.Excluded)
+	}
+	if indexedIDs(t, db)["slash"] {
+		t.Error("an excluded session stayed in the index")
+	}
+}
+
+// A session that is empty because it is a few milliseconds old must not be
+// excluded for good. Nothing marks it; the write that gives it a message is an
+// ordinary change, and the ordinary path indexes it.
+func TestBuildIndexesASessionOnceItHasAMessage(t *testing.T) {
+	dir := t.TempDir()
+	p := writeSlashCommandSession(t, dir, "later")
+
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}}); err != nil {
+		t.Fatal(err)
+	}
+	if indexedIDs(t, db)["later"] {
+		t.Fatal("setup: the empty session was indexed")
+	}
+
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	writeClaudeSession(t, dir, "later", "cli", "and then someone typed something")
+
+	pr, err := Build(ctx, db, BuildOptions{Dirs: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Indexed != 1 {
+		t.Errorf("Indexed = %d, want 1", pr.Indexed)
+	}
+	if !indexedIDs(t, db)["later"] {
+		t.Error("the session was not indexed once it had a message")
 	}
 }
 

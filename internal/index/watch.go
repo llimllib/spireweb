@@ -278,6 +278,18 @@ func (w *Watcher) reindex(ctx context.Context, paths []string) (int, error) {
 			// correct: the next event will pick it up.
 			continue
 		}
+		// Build's second exclusion test, for the same reason its first one is
+		// repeated here. This is the path that sees an empty session most
+		// often: Claude Code creates the file when the session opens, so a
+		// slash command run against a watched directory lands here with
+		// nothing in it.
+		if session.SkipParsedReason(s) != "" {
+			if err := w.db.deleteByPath(p); err != nil {
+				return chunks, err
+			}
+			continue
+		}
+
 		n, _, err := w.db.upsertSession(ctx, s, w.opts)
 		if err != nil {
 			return chunks, err

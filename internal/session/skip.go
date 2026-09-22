@@ -10,6 +10,10 @@ import (
 // SDK rather than typed by a person.
 const SkipSDK = "sdk session"
 
+// SkipEmpty is the reason returned for a session file that parsed cleanly and
+// holds no conversation at all.
+const SkipEmpty = "no conversation"
+
 // entrypointKey is the JSON key that says how a Claude Code session was
 // started. Matched as bytes rather than parsed: the check runs over every
 // candidate file on a cold build, and unmarshalling 284MB to read one string
@@ -67,6 +71,32 @@ func SkipReason(path string) string {
 		if !bytes.Equal(v, entrypointCLI) {
 			return SkipSDK
 		}
+	}
+	return ""
+}
+
+// SkipParsedReason reports why an already-parsed session should not be
+// indexed, or "" to index it.
+//
+// This is the half of the rule that cannot be answered from bytes. SkipReason
+// decides from the file; this decides from what the file turned out to mean,
+// and a caller owes the index both.
+//
+// The only case so far is a session with no messages. Claude Code writes a
+// session file for a bare slash command -- open it, run /model, quit, and the
+// result is a handful of `system`, `cost-state` and `last-prompt` records and
+// not one `user` or `assistant`. Only those two become messages, so the
+// session parses to nothing: no prose to search, no opening message to preview
+// with, and nothing for the titles pass to summarize. It reaches the list as a
+// blank row, which is the whole of its contribution.
+//
+// Emptiness is the test rather than the record types that caused it. A file
+// pi is midway through creating is momentarily empty too, and excluding it is
+// correct for as long as it stays that way -- the write that gives it a first
+// message is what brings it back, through the same path any other change takes.
+func SkipParsedReason(s *Session) string {
+	if len(s.Messages) == 0 {
+		return SkipEmpty
 	}
 	return ""
 }
