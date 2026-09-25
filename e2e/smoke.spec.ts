@@ -104,3 +104,29 @@ test("browsing scrolls nowhere", async ({ page }) => {
     .evaluate((pane) => pane.scrollTop);
   expect(scrolled).toBe(0);
 });
+
+test("copy as markdown copies the source, not the rendering", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/sessions/e2e-alpha");
+
+  const turn = page.locator(".turn-assistant");
+  const copy = turn.locator("button.turn-copy");
+
+  // Out of the way until the turn is hovered.
+  await expect(turn.locator(".turn-tools")).toHaveCSS("opacity", "0");
+  await turn.hover();
+  await expect(turn.locator(".turn-tools")).toHaveCSS("opacity", "1");
+
+  await copy.click();
+  await expect(copy).toHaveAttribute("aria-label", "Copied");
+
+  // Backticks and asterisks survive, which a selection of the rendered prose
+  // would have lost.
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toBe(
+    "Use flexbox: `display: flex`, then **`place-items: center`**.",
+  );
+});

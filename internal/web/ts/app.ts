@@ -3,7 +3,7 @@
 // Deliberately small. HTMX drives search and lazy tool expansion, <details>
 // handles collapsing, and navigation is plain links, so the only things left
 // for JavaScript are the ones the platform genuinely lacks: keyboard
-// navigation and scroll restoration.
+// navigation, scroll restoration, and the clipboard.
 
 const listPane = () => document.querySelector<HTMLElement>(".list");
 const rowLinks = () =>
@@ -155,6 +155,69 @@ function scrollToMatch(): void {
   if (!fits) pane.scrollBy(0, -16);
 }
 
+// ------------------------------------------------------------ copy markdown
+
+/**
+ * Copies a turn's markdown source, which the server embeds beside the
+ * rendered prose in a <template>. Selecting the prose and copying gives the
+ * rendered text, with code fences, links and emphasis flattened out of it.
+ */
+async function copyTurn(button: HTMLButtonElement): Promise<void> {
+  const source = button
+    .closest(".turn")
+    ?.querySelector<HTMLTemplateElement>("template.turn-source");
+  if (!source) return;
+
+  let ok = true;
+  try {
+    await writeClipboard(source.content.textContent ?? "");
+  } catch {
+    ok = false;
+  }
+  flash(button, ok ? "is-copied" : "is-failed", ok ? "Copied" : "Copy failed");
+}
+
+/**
+ * navigator.clipboard exists only in a secure context. 127.0.0.1 is one;
+ * `--addr 0.0.0.0:8080` reached by LAN address is not, and there the
+ * deprecated execCommand is the only way left.
+ */
+async function writeClipboard(text: string): Promise<void> {
+  if (navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  if (!copied) throw new Error("execCommand copy refused");
+}
+
+const flashTimers = new WeakMap<HTMLElement, number>();
+
+/** Shows a result on the button for a moment, and tells a screen reader. */
+function flash(button: HTMLButtonElement, cls: string, label: string): void {
+  const original = button.title;
+  button.classList.remove("is-copied", "is-failed");
+  button.classList.add(cls);
+  button.setAttribute("aria-label", label);
+
+  window.clearTimeout(flashTimers.get(button));
+  flashTimers.set(
+    button,
+    window.setTimeout(() => {
+      button.classList.remove(cls);
+      button.setAttribute("aria-label", original);
+    }, 1500),
+  );
+}
+
 // ------------------------------------------------------------------ bindings
 
 // gg, as in vim: g is a prefix, and only a second g within the timeout acts.
@@ -249,6 +312,14 @@ function init(): void {
   document
     .querySelector<HTMLButtonElement>("#help-open")
     ?.addEventListener("click", toggleHelp);
+
+  // Delegated, so one listener covers every turn in however long a session.
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLButtonElement>("button.turn-copy");
+    if (button) void copyTurn(button);
+  });
 
   // pagehide rather than unload: it fires for back/forward cache navigations
   // too, which unload does not.

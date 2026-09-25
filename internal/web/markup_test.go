@@ -111,3 +111,28 @@ func TestLayoutLinksTheFavicon(t *testing.T) {
 		t.Errorf("favicon href = %q", href)
 	}
 }
+
+// Copy as markdown reads the source out of a <template> beside the prose. It
+// has to be the text as written -- the point is to get back what rendering
+// threw away -- and it has to be inert, because session content routinely
+// contains HTML.
+func TestTurnCarriesItsMarkdownSource(t *testing.T) {
+	src := "Run `ls`, then:\n\n```html\n<script>alert(1)</script>\n```\n\n**done**"
+	f := newFixture(t, map[string][]string{"aaa": {userMsg("hi"), assistantMsg(src)}})
+	_, doc := f.get(t, "/sessions/aaa")
+
+	turn := doc.Find(".turn-assistant")
+	if turn.Find("button.turn-copy").Length() != 1 {
+		t.Fatal("assistant turn has no button.turn-copy")
+	}
+	tpl := turn.Find("template.turn-source")
+	if tpl.Length() != 1 {
+		t.Fatal("assistant turn has no template.turn-source for the copy button to read")
+	}
+	if got := tpl.Text(); got != src {
+		t.Errorf("template source = %q, want %q", got, src)
+	}
+	if tpl.Find("script").Length() != 0 {
+		t.Error("markdown source was parsed as markup")
+	}
+}

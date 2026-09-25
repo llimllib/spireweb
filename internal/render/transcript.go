@@ -42,6 +42,12 @@ type Entry struct {
 	// HTML is set for prose entries.
 	HTML template.HTML
 
+	// Source is the markdown HTML was rendered from, as the agent wrote it,
+	// for copying. It is carried in the page rather than fetched on click:
+	// prose is a small fraction of a session's bytes, and a clipboard write
+	// after an await can lose the user activation Safari requires for it.
+	Source string
+
 	// Tool is set when Kind is KindTool.
 	Tool *ToolEntry
 }
@@ -94,7 +100,7 @@ func Transcript(s *session.Session) []Entry {
 					continue
 				}
 				out = append(out, anchor(Entry{
-					Kind: m.Role, At: m.At, MsgIdx: i, HTML: Markdown(blk.Text)}))
+					Kind: m.Role, At: m.At, MsgIdx: i, HTML: Markdown(blk.Text), Source: blk.Text}))
 
 			case session.BlockThinking:
 				// Usually empty: the model returns a signature without the
@@ -103,7 +109,7 @@ func Transcript(s *session.Session) []Entry {
 					continue
 				}
 				out = append(out, anchor(Entry{
-					Kind: KindThinking, At: m.At, MsgIdx: i, HTML: Markdown(blk.Thinking)}))
+					Kind: KindThinking, At: m.At, MsgIdx: i, HTML: Markdown(blk.Thinking), Source: blk.Thinking}))
 
 			case session.BlockToolCall:
 				res, ok := results[blk.ID]
